@@ -1,0 +1,1214 @@
+import { useState, useCallback, useEffect, useRef } from "react";
+import type { ChatSession, UIMessage, PersistedSession, Project, ClaudeEvent, SystemInitEvent, SessionInfo, ImageAttachment, McpServerStatus, McpServerConfig } from "../types";
+import { toMcpStatusState } from "../types/ui";
+import type { ACPSessionEvent, ACPConfigOption } from "../types/acp";
+import { useClaude } from "./useClaude";
+import { useACP } from "./useACP";
+import { BackgroundSessionStore } from "../lib/background-session-store";
+import { buildSdkContent } from "../lib/protocol";
+
+interface StartOptions {
+  model?: string;
+  permissionMode?: string;
+  engine?: "claude" | "acp";
+  agentId?: string;
+}
+
+const DRAFT_ID = "__draft__";
+
+export function useSessionManager(projects: Project[]) {
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
+  const [startOptions, setStartOptions] = useState<StartOptions>({});
+  // Track which project the current draft/session belongs to
+  const [draftProjectId, setDraftProjectId] = useState<string | null>(null);
+  const [initialMeta, setInitialMeta] = useState<{
+    isProcessing: boolean;
+    isConnected: boolean;
+    sessionInfo: SessionInfo | null;
+    totalCost: number;
+  } | null>(null);
+  const [initialConfigOptions, setInitialConfigOptions] = useState<ACPConfigOption[]>([]);
+  const [acpMcpStatuses, setAcpMcpStatuses] = useState<McpServerStatus[]>([]);
+  // Eager session start: pre-started SDK session for immediate MCP status display
+  const [preStartedSessionId, setPreStartedSessionId] = useState<string | null>(null);
+  const preStartedSessionIdRef = useRef<string | null>(null);
+  const [draftMcpStatuses, setDraftMcpStatuses] = useState<McpServerStatus[]>([]);
+  const draftMcpStatusesRef = useRef<McpServerStatus[]>([]);
+  draftMcpStatusesRef.current = draftMcpStatuses;
+  // ACP agent tracking — needed to restart the session with updated MCP servers
+  const acpAgentIdRef = useRef<string | null>(null);
+  // ACP-side session ID — persisted so we can call session/load on revival after restart
+  const acpAgentSessionIdRef = useRef<string | null>(null);
+
+  // Determine which engine the active session uses
+  const activeEngine = activeSessionId === DRAFT_ID
+    ? (startOptions.engine ?? "claude")
+    : (sessions.find(s => s.id === activeSessionId)?.engine ?? "claude");
+  const isACP = activeEngine === "acp";
+
+  const claudeSessionId = (!isACP && activeSessionId !== DRAFT_ID) ? activeSessionId : null;
+  const acpSessionId = (isACP && activeSessionId !== DRAFT_ID) ? activeSessionId : null;
+
+  const claude = useClaude({ sessionId: claudeSessionId, initialMessages: isACP ? [] : initialMessages, initialMeta: isACP ? null : initialMeta });
+  const acp = useACP({ sessionId: acpSessionId, initialMessages: isACP ? initialMessages : [], initialConfigOptions: isACP ? initialConfigOptions : [], initialMeta: isACP ? initialMeta : null });
+
+  // Pick the active engine's state
+  const engine = isACP ? acp : claude;
+  const { messages, totalCost, sessionInfo } = engine;
+
+  const liveSessionIdsRef = useRef<Set<string>>(new Set());
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const totalCostRef = useRef(totalCost);
+  totalCostRef.current = totalCost;
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  const draftProjectIdRef = useRef(draftProjectId);
+  draftProjectIdRef.current = draftProjectId;
+  const startOptionsRef = useRef(startOptions);
+  startOptionsRef.current = startOptions;
+  const isProcessingRef = useRef(engine.isProcessing);
+  isProcessingRef.current = engine.isProcessing;
+  const isConnectedRef = useRef(engine.isConnected);
+  isConnectedRef.current = engine.isConnected;
+  const sessionInfoRef = useRef(engine.sessionInfo);
+  sessionInfoRef.current = engine.sessionInfo;
+
+  const backgroundStoreRef = useRef(new BackgroundSessionStore());
+
+  // Wire up background store processing change callback for sidebar spinner
+  useEffect(() => {
+    backgroundStoreRef.current.onProcessingChange = (sessionId, isProcessing) => {
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId ? { ...s, isProcessing } : s,
+        ),
+      );
+    };
+  }, []);
+
+  const findProject = useCallback((projectId: string) => {
+    return projectsRef.current.find((p) => p.id === projectId) ?? null;
+  }, []);
+
+  // Eagerly start a Claude SDK session for immediate MCP status display
+  const eagerStartSession = useCallback(async (projectId: string, options?: StartOptions) => {
+    const project = projectsRef.current.find((p) => p.id === projectId);
+    if (!project) return;
+    const mcpServers = await window.claude.mcp.list(projectId);
+    const result = await window.claude.start({
+      cwd: project.path,
+      model: options?.model,
+      permissionMode: options?.permissionMode,
+      mcpServers,
+    });
+    // Only commit if still in draft for the same project
+    if (activeSessionIdRef.current === DRAFT_ID && draftProjectIdRef.current === projectId) {
+      liveSessionIdsRef.current.add(result.sessionId);
+      preStartedSessionIdRef.current = result.sessionId;
+      setPreStartedSessionId(result.sessionId);
+
+      // The system init event fires BEFORE start() returns, so the event router
+      // couldn't match it (preStartedSessionIdRef was still null). Query MCP
+      // status directly now that the session is initialized.
+      const statusResult = await window.claude.mcpStatus(result.sessionId);
+      if (statusResult.servers?.length && preStartedSessionIdRef.current === result.sessionId) {
+        setDraftMcpStatuses(statusResult.servers.map(s => ({
+          name: s.name,
+          status: toMcpStatusState(s.status),
+        })));
+      }
+    } else {
+      // Draft was abandoned before eager start completed
+      window.claude.stop(result.sessionId);
+    }
+  }, []);
+
+  // Probe MCP servers ourselves (for engines that don't report status, e.g. ACP)
+  const probeMcpServers = useCallback(async (projectId: string, overrideServers?: McpServerConfig[]) => {
+    const servers = overrideServers ?? await window.claude.mcp.list(projectId);
+    if (servers.length === 0) {
+      setDraftMcpStatuses([]);
+      return;
+    }
+    // Show pending while probing
+    if (activeSessionIdRef.current === DRAFT_ID && draftProjectIdRef.current === projectId) {
+      setDraftMcpStatuses(servers.map(s => ({
+        name: s.name,
+        status: "pending" as const,
+      })));
+    }
+    // Probe each server for real connectivity
+    const results = await window.claude.mcp.probe(servers);
+    if (activeSessionIdRef.current === DRAFT_ID && draftProjectIdRef.current === projectId) {
+      setDraftMcpStatuses(results.map(r => ({
+        name: r.name,
+        status: toMcpStatusState(r.status),
+        ...(r.error ? { error: r.error } : {}),
+      })));
+    }
+  }, []);
+
+  // Clean up a pre-started eager session
+  const abandonEagerSession = useCallback(() => {
+    const id = preStartedSessionIdRef.current;
+    if (!id) return;
+    window.claude.stop(id);
+    liveSessionIdsRef.current.delete(id);
+    backgroundStoreRef.current.delete(id);
+    preStartedSessionIdRef.current = null;
+    setPreStartedSessionId(null);
+    setDraftMcpStatuses([]);
+  }, []);
+
+  // Update MCP servers for the active ACP session, preserving conversation context.
+  // Tries session/load (no process restart, full context preserved) first.
+  // Falls back to stop+restart (UI messages restored) if the agent doesn't support it.
+  const restartAcpSession = useCallback(async (servers: McpServerConfig[]) => {
+    const currentId = activeSessionIdRef.current;
+    if (!currentId || currentId === DRAFT_ID) return;
+
+    const session = sessionsRef.current.find(s => s.id === currentId);
+    const project = session ? findProject(session.projectId) : null;
+    const agentId = acpAgentIdRef.current;
+    if (!session || !project || !agentId) return;
+
+    // Probe servers so we get accurate statuses (including needs-auth) before any reload
+    const probeResults = await window.claude.mcp.probe(servers);
+    // Guard: session may have changed during async probe
+    if (activeSessionIdRef.current !== currentId) return;
+    setAcpMcpStatuses(probeResults.map(r => ({
+      name: r.name,
+      status: toMcpStatusState(r.status),
+      ...(r.error ? { error: r.error } : {}),
+    })));
+
+    // Try session/load first — updates MCP on the existing connection, no context loss
+    const reloadResult = await window.claude.acp.reloadSession(currentId, servers);
+    if (reloadResult.supportsLoad && reloadResult.ok) {
+      // session/load succeeded — session ID and process unchanged, context preserved
+      return;
+    }
+
+    // Fall back to stop + restart (agent doesn't support session/load, or reload failed)
+    const currentMessages = messagesRef.current;
+    const currentCost = totalCostRef.current;
+
+    await window.claude.acp.stop(currentId);
+    liveSessionIdsRef.current.delete(currentId);
+    backgroundStoreRef.current.delete(currentId);
+
+    const result = await window.claude.acp.start({
+      agentId,
+      cwd: project.path,
+      mcpServers: servers,
+    });
+    if (result.error || !result.sessionId) return;
+
+    const newId = result.sessionId;
+    liveSessionIdsRef.current.add(newId);
+
+    setSessions(prev => prev.map(s =>
+      s.id === currentId ? { ...s, id: newId } : s
+    ));
+    // Restore UI message history and config options through initialMessages → useACP reset effect
+    setInitialMessages(currentMessages);
+    setInitialMeta({ isProcessing: false, isConnected: true, sessionInfo: null, totalCost: currentCost });
+    if (result.configOptions?.length) setInitialConfigOptions(result.configOptions);
+    setActiveSessionId(newId);
+  }, [findProject]);
+
+  useEffect(() => {
+    const handleSessionExit = (sid: string) => {
+      liveSessionIdsRef.current.delete(sid);
+
+      // If the pre-started eager session crashed, clear it
+      if (sid === preStartedSessionIdRef.current) {
+        preStartedSessionIdRef.current = null;
+        setPreStartedSessionId(null);
+        backgroundStoreRef.current.delete(sid);
+        return;
+      }
+
+      // Auto-save and mark disconnected for background sessions
+      if (sid !== activeSessionIdRef.current && backgroundStoreRef.current.has(sid)) {
+        backgroundStoreRef.current.markDisconnected(sid);
+        const bgState = backgroundStoreRef.current.get(sid);
+        const session = sessionsRef.current.find((s) => s.id === sid);
+        if (bgState && session) {
+          window.claude.sessions.save({
+            id: sid,
+            projectId: session.projectId,
+            title: session.title,
+            createdAt: session.createdAt,
+            messages: bgState.messages,
+            model: session.model || bgState.sessionInfo?.model,
+            totalCost: bgState.totalCost,
+            engine: session.engine,
+          });
+        }
+      }
+    };
+
+    const unsubExit = window.claude.onExit((data) => handleSessionExit(data._sessionId));
+    const unsubAcpExit = window.claude.acp.onExit((data: { _sessionId: string; code: number | null }) => handleSessionExit(data._sessionId));
+    return () => {
+      unsubExit();
+      unsubAcpExit();
+    };
+  }, []);
+
+  // Route events for non-active sessions to the background store
+  useEffect(() => {
+    const unsub = window.claude.onEvent((event: ClaudeEvent & { _sessionId?: string }) => {
+      const sid = event._sessionId;
+      if (!sid) return;
+      if (sid === activeSessionIdRef.current) return;
+
+      // Pre-started session: route to background store AND extract MCP statuses
+      if (sid === preStartedSessionIdRef.current) {
+        backgroundStoreRef.current.handleEvent(event);
+        if (event.type === "system" && "subtype" in event && event.subtype === "init") {
+          const init = event as SystemInitEvent;
+          if (init.mcp_servers?.length) {
+            setDraftMcpStatuses(init.mcp_servers.map(s => ({
+              name: s.name,
+              status: toMcpStatusState(s.status),
+            })));
+          }
+        }
+        return;
+      }
+
+      backgroundStoreRef.current.handleEvent(event);
+    });
+    const unsubAcp = window.claude.acp.onEvent((event: ACPSessionEvent) => {
+      const sid = event._sessionId;
+      if (!sid) return;
+      if (sid === activeSessionIdRef.current) return;
+      backgroundStoreRef.current.handleACPEvent(event);
+    });
+    return () => { unsub(); unsubAcp(); };
+  }, []);
+
+  // Load sessions for ALL projects
+  useEffect(() => {
+    if (projects.length === 0) {
+      setSessions([]);
+      return;
+    }
+    Promise.all(
+      projects.map((p) => window.claude.sessions.list(p.id)),
+    ).then((results) => {
+      const all = results.flat().map((s) => ({
+        id: s.id,
+        projectId: s.projectId,
+        title: s.title,
+        createdAt: s.createdAt,
+        model: s.model,
+        totalCost: s.totalCost,
+        isActive: false,
+        engine: s.engine,
+      }));
+      setSessions(all);
+    }).catch(() => { /* IPC failure — leave sessions empty */ });
+  }, [projects]);
+
+  // AI-generated title via background Haiku instance
+  const generateSessionTitle = useCallback(
+    async (sessionId: string, message: string, projectPath: string) => {
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId ? { ...s, titleGenerating: true } : s,
+        ),
+      );
+
+      const fallbackTitle =
+        message.length > 60 ? message.slice(0, 57) + "..." : message;
+
+      try {
+        const result = await window.claude.generateTitle(message, projectPath);
+
+        // Guard: session may have been deleted or manually renamed while generating
+        const current = sessionsRef.current.find((s) => s.id === sessionId);
+        if (!current || !current.titleGenerating) return;
+
+        const title = result.title || fallbackTitle;
+
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === sessionId
+              ? { ...s, title, titleGenerating: false }
+              : s,
+          ),
+        );
+
+        // Persist the new title
+        const data = await window.claude.sessions.load(
+          current.projectId,
+          sessionId,
+        );
+        if (data) {
+          await window.claude.sessions.save({ ...data, title });
+        }
+      } catch {
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === sessionId
+              ? { ...s, title: fallbackTitle, titleGenerating: false }
+              : s,
+          ),
+        );
+      }
+    },
+    [],
+  );
+
+  // Debounced auto-save
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!activeSessionId || activeSessionId === DRAFT_ID || messages.length === 0) return;
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const session = sessionsRef.current.find((s) => s.id === activeSessionId);
+      if (!session) return;
+      const data: PersistedSession = {
+        id: activeSessionId,
+        projectId: session.projectId,
+        title: session.title,
+        createdAt: session.createdAt,
+        messages: messagesRef.current,
+        model: session.model || sessionInfo?.model,
+        totalCost: totalCostRef.current,
+        engine: session.engine,
+        ...(session.agentId ? { agentId: session.agentId } : {}),
+        ...(session.agentSessionId ? { agentSessionId: session.agentSessionId } : {}),
+      };
+      window.claude.sessions.save(data);
+    }, 2000);
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [messages, activeSessionId, sessionInfo?.model]);
+
+  useEffect(() => {
+    if (!activeSessionId || activeSessionId === DRAFT_ID || !sessionInfo?.model) return;
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === activeSessionId ? { ...s, model: sessionInfo.model } : s,
+      ),
+    );
+  }, [activeSessionId, sessionInfo?.model]);
+
+  useEffect(() => {
+    if (!activeSessionId || activeSessionId === DRAFT_ID || totalCost === 0) return;
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === activeSessionId ? { ...s, totalCost } : s,
+      ),
+    );
+  }, [activeSessionId, totalCost]);
+
+  // Sync active session's isProcessing to the session list (for sidebar spinner)
+  useEffect(() => {
+    if (!activeSessionId || activeSessionId === DRAFT_ID) return;
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === activeSessionId ? { ...s, isProcessing: engine.isProcessing } : s,
+      ),
+    );
+  }, [activeSessionId, engine.isProcessing]);
+
+  const saveCurrentSession = useCallback(async () => {
+    const id = activeSessionIdRef.current;
+    if (!id || id === DRAFT_ID || messagesRef.current.length === 0) return;
+    const session = sessionsRef.current.find((s) => s.id === id);
+    if (!session) return;
+    const data: PersistedSession = {
+      id,
+      projectId: session.projectId,
+      title: session.title,
+      createdAt: session.createdAt,
+      messages: messagesRef.current,
+      model: session.model,
+      totalCost: totalCostRef.current,
+      engine: session.engine,
+      ...(session.agentId ? { agentId: session.agentId } : {}),
+      ...(session.agentSessionId ? { agentSessionId: session.agentSessionId } : {}),
+    };
+    await window.claude.sessions.save(data);
+  }, []);
+
+  // Seed background store with current active session's state
+  const seedBackgroundStore = useCallback(() => {
+    const currentId = activeSessionIdRef.current;
+    if (currentId && currentId !== DRAFT_ID && liveSessionIdsRef.current.has(currentId)) {
+      backgroundStoreRef.current.initFromState(currentId, {
+        messages: messagesRef.current,
+        isProcessing: isProcessingRef.current,
+        isConnected: isConnectedRef.current,
+        sessionInfo: sessionInfoRef.current,
+        totalCost: totalCostRef.current,
+      });
+    }
+  }, []);
+
+  // createSession now requires a projectId
+  const createSession = useCallback(
+    async (projectId: string, options?: StartOptions) => {
+      abandonEagerSession();
+      acpAgentIdRef.current = null;
+      acpAgentSessionIdRef.current = null;
+      setAcpMcpStatuses([]);
+      await saveCurrentSession();
+      seedBackgroundStore();
+      setStartOptions(options ?? {});
+      setDraftProjectId(projectId);
+      setInitialMessages([]);
+      setInitialMeta(null);
+      setActiveSessionId(DRAFT_ID);
+      setSessions((prev) => prev.map((s) => ({ ...s, isActive: false })));
+
+      // Eager start for Claude engine (fire-and-forget)
+      const draftEngine = options?.engine ?? "claude";
+      if (draftEngine !== "acp") {
+        eagerStartSession(projectId, options);
+        // Set immediate "pending" statuses while SDK connects
+        window.claude.mcp.list(projectId).then(servers => {
+          if (activeSessionIdRef.current === DRAFT_ID && draftProjectIdRef.current === projectId) {
+            setDraftMcpStatuses(servers.map(s => ({
+              name: s.name,
+              status: "pending" as const,
+            })));
+          }
+        }).catch(() => { /* IPC failure */ });
+      } else {
+        // ACP: no eager session — probe servers ourselves for preliminary status
+        probeMcpServers(projectId);
+      }
+    },
+    [saveCurrentSession, seedBackgroundStore, eagerStartSession, abandonEagerSession],
+  );
+
+  const materializingRef = useRef(false);
+  const materializeDraft = useCallback(
+    async (text: string) => {
+      // Re-entrancy guard — prevent double-materialization from rapid sends
+      if (materializingRef.current) return "";
+      materializingRef.current = true;
+
+      const projectId = draftProjectIdRef.current;
+      const project = projectId ? findProject(projectId) : null;
+      if (!project) {
+        console.warn("[materializeDraft] No project found for draftProjectId:", projectId);
+        materializingRef.current = false;
+        return "";
+      }
+      const options = startOptionsRef.current;
+      const draftEngine = options.engine ?? "claude";
+      console.log("[materializeDraft] engine=%s agentId=%s project=%s", draftEngine, options.agentId, project.path);
+
+      let sessionId: string;
+      let reusedPreStarted = false;
+
+      // Load per-project MCP servers to pass to the session
+      const mcpServers = await window.claude.mcp.list(project.id);
+
+      if (draftEngine === "acp" && options.agentId) {
+        console.log("[materializeDraft] Calling acp:start...");
+        const result = await window.claude.acp.start({
+          agentId: options.agentId,
+          cwd: project.path,
+          mcpServers,
+        });
+        console.log("[materializeDraft] acp:start result:", result);
+        if (result.error || !result.sessionId) {
+          materializingRef.current = false;
+          return "";
+        }
+        sessionId = result.sessionId;
+        // Track agentId and agentSessionId for restarts and revival after app restart
+        acpAgentIdRef.current = options.agentId;
+        acpAgentSessionIdRef.current = result.agentSessionId ?? null;
+        // Store initial config options from the agent (model, mode, etc.)
+        if (result.configOptions?.length) {
+          setInitialConfigOptions(result.configOptions);
+        }
+        // Transition draftMcpStatuses (from probe) → acpMcpStatuses for the live session
+        setAcpMcpStatuses(draftMcpStatusesRef.current.length > 0
+          ? draftMcpStatusesRef.current
+          : mcpServers.map(s => ({ name: s.name, status: "connected" as const }))
+        );
+      } else {
+        // Claude SDK path — reuse pre-started session if available
+        const preStarted = preStartedSessionIdRef.current;
+        if (preStarted && liveSessionIdsRef.current.has(preStarted)) {
+          sessionId = preStarted;
+          preStartedSessionIdRef.current = null;
+          setPreStartedSessionId(null);
+          reusedPreStarted = true;
+
+          // Consume background store state accumulated during draft
+          const bgState = backgroundStoreRef.current.consume(sessionId);
+          if (bgState) {
+            setInitialMessages(bgState.messages);
+            setInitialMeta({
+              isProcessing: bgState.isProcessing,
+              isConnected: bgState.isConnected,
+              sessionInfo: bgState.sessionInfo,
+              totalCost: bgState.totalCost,
+            });
+          }
+        } else {
+          // Fallback: start normally (eager start failed or was cleaned up)
+          const result = await window.claude.start({
+            cwd: project.path,
+            model: options.model,
+            permissionMode: options.permissionMode,
+            mcpServers,
+          });
+          sessionId = result.sessionId;
+        }
+      }
+      liveSessionIdsRef.current.add(sessionId);
+
+      const newSession: ChatSession = {
+        id: sessionId,
+        projectId: project.id,
+        title: "New Chat",
+        createdAt: Date.now(),
+        model: options.model,
+        totalCost: 0,
+        isActive: true,
+        titleGenerating: true,
+        engine: draftEngine,
+        ...(draftEngine === "acp" && options.agentId ? {
+          agentId: options.agentId,
+          agentSessionId: acpAgentSessionIdRef.current ?? undefined,
+        } : {}),
+      };
+
+      setSessions((prev) =>
+        [newSession, ...prev.map((s) => ({ ...s, isActive: false }))],
+      );
+      if (!reusedPreStarted) {
+        setInitialMessages([]);
+        setInitialMeta(null);
+      }
+      setActiveSessionId(sessionId);
+      setDraftProjectId(null);
+
+      // Refresh MCP status since useClaude may have missed the system init event
+      setTimeout(() => { claude.refreshMcpStatus(); }, 500);
+
+      // Fire-and-forget AI title generation
+      generateSessionTitle(sessionId, text, project.path);
+
+      materializingRef.current = false;
+      return sessionId;
+    },
+    [findProject, generateSessionTitle],
+  );
+
+  const switchSession = useCallback(
+    async (id: string) => {
+      if (id === activeSessionIdRef.current) return;
+
+      abandonEagerSession();
+      acpAgentIdRef.current = null;
+      acpAgentSessionIdRef.current = null;
+      await saveCurrentSession();
+      seedBackgroundStore();
+
+      const session = sessionsRef.current.find((s) => s.id === id);
+      if (!session) return;
+
+      // Restore from background store if available (live session with accumulated events)
+      const bgState = backgroundStoreRef.current.consume(id);
+      if (bgState) {
+        setInitialMessages(bgState.messages);
+        setInitialMeta({
+          isProcessing: bgState.isProcessing,
+          isConnected: bgState.isConnected,
+          sessionInfo: bgState.sessionInfo,
+          totalCost: bgState.totalCost,
+        });
+        setActiveSessionId(id);
+        setDraftProjectId(null);
+        setSessions((prev) =>
+          prev.map((s) => ({ ...s, isActive: s.id === id })),
+        );
+        return;
+      }
+
+      // Fall back to loading from disk (non-live session)
+      const data = await window.claude.sessions.load(session.projectId, id);
+      if (data) {
+        setInitialMessages(data.messages);
+        setInitialMeta(null);
+        setActiveSessionId(id);
+        setDraftProjectId(null);
+        setSessions((prev) =>
+          prev.map((s) => ({
+            ...s,
+            isActive: s.id === id,
+            // Restore fields from persisted data (may be missing from sessions:list metadata)
+            ...(s.id === id ? {
+              ...(data.engine ? { engine: data.engine } : {}),
+              ...(data.agentId ? { agentId: data.agentId } : {}),
+              ...(data.agentSessionId ? { agentSessionId: data.agentSessionId } : {}),
+            } : {}),
+          })),
+        );
+      }
+    },
+    [saveCurrentSession, seedBackgroundStore, abandonEagerSession],
+  );
+
+  const deleteSession = useCallback(
+    async (id: string) => {
+      const session = sessionsRef.current.find((s) => s.id === id);
+      if (!session) return;
+      if (liveSessionIdsRef.current.has(id)) {
+        if (session.engine === "acp") {
+          await window.claude.acp.stop(id);
+        } else {
+          await window.claude.stop(id);
+        }
+        liveSessionIdsRef.current.delete(id);
+      }
+      backgroundStoreRef.current.delete(id);
+      await window.claude.sessions.delete(session.projectId, id);
+      if (activeSessionIdRef.current === id) {
+        setActiveSessionId(null);
+        setInitialMessages([]);
+        setInitialMeta(null);
+      }
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+    },
+    [],
+  );
+
+  const renameSession = useCallback((id: string, title: string) => {
+    const session = sessionsRef.current.find((s) => s.id === id);
+    if (!session) return;
+    setSessions((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, title, titleGenerating: false } : s)),
+    );
+    window.claude.sessions.load(session.projectId, id).then((data) => {
+      if (data) {
+        window.claude.sessions.save({ ...data, title });
+      }
+    }).catch(() => { /* session may have been deleted */ });
+  }, []);
+
+  const setActiveModel = useCallback((model: string) => {
+    const id = activeSessionIdRef.current;
+    if (!id) return;
+
+    if (id === DRAFT_ID) {
+      setStartOptions((prev) => ({ ...prev, model }));
+      // Model change requires session restart — stop eager session and re-start
+      if (preStartedSessionIdRef.current) {
+        const oldId = preStartedSessionIdRef.current;
+        window.claude.stop(oldId);
+        liveSessionIdsRef.current.delete(oldId);
+        backgroundStoreRef.current.delete(oldId);
+        preStartedSessionIdRef.current = null;
+        setPreStartedSessionId(null);
+        setDraftMcpStatuses([]);
+        // Re-start eager session with new model
+        if (draftProjectIdRef.current) {
+          eagerStartSession(draftProjectIdRef.current, { ...startOptionsRef.current, model });
+          // Set pending statuses while new session connects
+          window.claude.mcp.list(draftProjectIdRef.current).then(servers => {
+            if (activeSessionIdRef.current === DRAFT_ID) {
+              setDraftMcpStatuses(servers.map(s => ({
+                name: s.name,
+                status: "pending" as const,
+              })));
+            }
+          }).catch(() => { /* IPC failure */ });
+        }
+      }
+      return;
+    }
+
+    const session = sessionsRef.current.find((s) => s.id === id);
+    if (!session) return;
+
+    setSessions((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, model } : s)),
+    );
+
+    window.claude.sessions.load(session.projectId, id).then((data) => {
+      if (data) {
+        window.claude.sessions.save({ ...data, model });
+      }
+    }).catch(() => { /* session may have been deleted */ });
+  }, [eagerStartSession]);
+
+  const importCCSession = useCallback(
+    async (projectId: string, ccSessionId: string) => {
+      const project = findProject(projectId);
+      if (!project) return;
+
+      // If already imported, just switch to it
+      const existing = sessionsRef.current.find((s) => s.id === ccSessionId);
+      if (existing) {
+        await switchSession(ccSessionId);
+        return;
+      }
+
+      await saveCurrentSession();
+      seedBackgroundStore();
+
+      const result = await window.claude.ccSessions.import(project.path, ccSessionId);
+      if (result.error || !result.messages) return;
+
+      const firstUserMsg = result.messages.find((m) => m.role === "user");
+      const titleText = firstUserMsg?.content || "Imported Session";
+
+      const newSession: ChatSession = {
+        id: ccSessionId,
+        projectId: project.id,
+        title: titleText.length > 60 ? titleText.slice(0, 57) + "..." : titleText,
+        createdAt: result.messages[0]?.timestamp || Date.now(),
+        totalCost: 0,
+        isActive: true,
+      };
+
+      // Persist immediately so switchSession can load it later
+      await window.claude.sessions.save({
+        id: ccSessionId,
+        projectId: project.id,
+        title: newSession.title,
+        createdAt: newSession.createdAt,
+        messages: result.messages,
+        totalCost: 0,
+      });
+
+      setSessions((prev) => [
+        newSession,
+        ...prev.map((s) => ({ ...s, isActive: false })),
+      ]);
+      setInitialMessages(result.messages);
+      setInitialMeta(null);
+      setActiveSessionId(ccSessionId);
+      setDraftProjectId(null);
+    },
+    [findProject, saveCurrentSession, seedBackgroundStore, switchSession],
+  );
+
+  const setDraftAgent = useCallback((engine: "claude" | "acp", agentId: string) => {
+    setStartOptions((prev) => ({ ...prev, engine, agentId }));
+  }, []);
+
+  const setActivePermissionMode = useCallback((permissionMode: string) => {
+    const id = activeSessionIdRef.current;
+    if (!id) return;
+
+    if (id === DRAFT_ID) {
+      setStartOptions((prev) => ({ ...prev, permissionMode }));
+      // Apply to pre-started session if running (no restart needed)
+      if (preStartedSessionIdRef.current) {
+        window.claude.setPermissionMode(preStartedSessionIdRef.current, permissionMode);
+      }
+      return;
+    }
+    // Change permission mode on the running SDK session (no-op for ACP)
+    engine.setPermissionMode(permissionMode);
+  }, [engine.setPermissionMode]);
+
+  const reviveAcpSession = useCallback(
+    async (text: string, images?: ImageAttachment[]) => {
+      const oldId = activeSessionIdRef.current;
+      if (!oldId || oldId === DRAFT_ID) return;
+      const session = sessionsRef.current.find((s) => s.id === oldId);
+      if (!session || !session.agentId) {
+        acp.setMessages((prev) => [...prev, {
+          id: `system-error-${Date.now()}`,
+          role: "system" as const,
+          content: "ACP session disconnected. Please start a new session.",
+          timestamp: Date.now(),
+        }]);
+        return;
+      }
+      const project = findProject(session.projectId);
+      if (!project) return;
+
+      const mcpServers = await window.claude.mcp.list(session.projectId);
+      const result = await window.claude.acp.reviveSession({
+        agentId: session.agentId,
+        cwd: project.path,
+        agentSessionId: session.agentSessionId,
+        mcpServers,
+      });
+
+      if (result.error || !result.sessionId) {
+        acp.setMessages((prev) => [...prev, {
+          id: `system-error-${Date.now()}`,
+          role: "system" as const,
+          content: "Failed to reconnect ACP session. Please start a new session.",
+          timestamp: Date.now(),
+        }]);
+        return;
+      }
+
+      const newId = result.sessionId;
+      liveSessionIdsRef.current.add(newId);
+      acpAgentIdRef.current = session.agentId;
+      acpAgentSessionIdRef.current = result.agentSessionId ?? session.agentSessionId ?? null;
+
+      setSessions((prev) => prev.map((s) =>
+        s.id === oldId
+          ? { ...s, id: newId, agentSessionId: result.agentSessionId ?? s.agentSessionId }
+          : s,
+      ));
+      setAcpMcpStatuses((result.mcpStatuses ?? []).map(s => ({
+        name: s.name,
+        status: toMcpStatusState(s.status),
+      })));
+      setInitialMessages(messagesRef.current);
+      setInitialMeta({ isProcessing: false, isConnected: true, sessionInfo: null, totalCost: totalCostRef.current });
+      if (result.configOptions?.length) setInitialConfigOptions(result.configOptions);
+      setActiveSessionId(newId);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      acp.setMessages((prev) => [...prev, {
+        id: `user-${Date.now()}`,
+        role: "user" as const,
+        content: text,
+        timestamp: Date.now(),
+        ...(images?.length ? { images } : {}),
+      }]);
+      acp.setIsProcessing(true);
+      const promptResult = await window.claude.acp.prompt(newId, text, images);
+      if (promptResult?.error) {
+        acp.setMessages((prev) => [...prev, {
+          id: `system-acp-error-${Date.now()}`,
+          role: "system" as const,
+          content: `ACP error: ${promptResult.error}`,
+          timestamp: Date.now(),
+        }]);
+        acp.setIsProcessing(false);
+      }
+    },
+    [findProject, acp.setMessages, acp.setIsProcessing],
+  );
+
+  const reviveSession = useCallback(
+    async (text: string, images?: ImageAttachment[]) => {
+      const oldId = activeSessionIdRef.current;
+      if (!oldId || oldId === DRAFT_ID) return;
+      const session = sessionsRef.current.find((s) => s.id === oldId);
+      if (!session) return;
+      const project = findProject(session.projectId);
+      if (!project) return;
+
+      const startPayload: StartOptions & { cwd: string; resume?: string } = {
+        cwd: project.path,
+        ...(session.model ? { model: session.model } : {}),
+        permissionMode: startOptionsRef.current.permissionMode,
+        resume: oldId, // Resume the SDK session to restore conversation context
+      };
+
+      const result = await window.claude.start(startPayload);
+      const newSessionId = result.sessionId;
+
+      if (newSessionId !== oldId) {
+        // SDK returned a different ID (shouldn't happen with resume, but handle it)
+        liveSessionIdsRef.current.delete(oldId);
+        liveSessionIdsRef.current.add(newSessionId);
+
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === oldId
+              ? { ...s, id: newSessionId, isActive: true }
+              : { ...s, isActive: false },
+          ),
+        );
+
+        const oldData = await window.claude.sessions.load(project.id, oldId);
+        if (oldData) {
+          await window.claude.sessions.save({
+            ...oldData,
+            id: newSessionId,
+            messages: messagesRef.current,
+            model: session.model ?? oldData.model,
+          });
+          await window.claude.sessions.delete(project.id, oldId);
+        }
+
+        setActiveSessionId(newSessionId);
+      } else {
+        liveSessionIdsRef.current.add(oldId);
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === oldId ? { ...s, isActive: true } : { ...s, isActive: false },
+          ),
+        );
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const content = buildSdkContent(text, images);
+      const sendResult = await window.claude.send(newSessionId, {
+        type: "user",
+        message: { role: "user", content },
+      });
+      if (sendResult?.error) {
+        liveSessionIdsRef.current.delete(newSessionId);
+        engine.setMessages((prev) => [
+          ...prev,
+          {
+            id: `system-send-error-${Date.now()}`,
+            role: "system",
+            content: `Unable to send message: ${sendResult.error}`,
+            timestamp: Date.now(),
+          },
+        ]);
+        return;
+      }
+      engine.setMessages((prev) => [
+        ...prev,
+        {
+          id: `user-${Date.now()}`,
+          role: "user",
+          content: text,
+          timestamp: Date.now(),
+          ...(images?.length ? { images } : {}),
+        },
+      ]);
+    },
+    [engine.setMessages, findProject],
+  );
+
+  const send = useCallback(
+    async (text: string, images?: ImageAttachment[]) => {
+      const activeId = activeSessionIdRef.current;
+      if (activeId === DRAFT_ID) {
+        const draftEngine = startOptionsRef.current.engine ?? "claude";
+        const sessionId = await materializeDraft(text);
+        if (!sessionId) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        if (draftEngine === "acp") {
+          // Can't use acp.send() here — its closure still has sessionId=null from the
+          // DRAFT render. Call the IPC directly (like the Claude path does) and update state manually.
+          acp.setMessages((prev) => [
+            ...prev,
+            {
+              id: `user-${Date.now()}`,
+              role: "user" as const,
+              content: text,
+              timestamp: Date.now(),
+              ...(images?.length ? { images } : {}),
+            },
+          ]);
+          acp.setIsProcessing(true);
+          const promptResult = await window.claude.acp.prompt(sessionId, text, images);
+          if (promptResult?.error) {
+            acp.setMessages((prev) => [
+              ...prev,
+              {
+                id: `system-acp-error-${Date.now()}`,
+                role: "system" as const,
+                content: `ACP prompt error: ${promptResult.error}`,
+                timestamp: Date.now(),
+              },
+            ]);
+            acp.setIsProcessing(false);
+          }
+        } else {
+          const content = buildSdkContent(text, images);
+          const sendResult = await window.claude.send(sessionId, {
+            type: "user",
+            message: { role: "user", content },
+          });
+          if (sendResult?.error) {
+            liveSessionIdsRef.current.delete(sessionId);
+            claude.setMessages((prev) => [
+              ...prev,
+              {
+                id: `system-send-error-${Date.now()}`,
+                role: "system",
+                content: `Unable to send message: ${sendResult.error}`,
+                timestamp: Date.now(),
+              },
+            ]);
+            return;
+          }
+          claude.setMessages((prev) => [
+            ...prev,
+            {
+              id: `user-${Date.now()}`,
+              role: "user",
+              content: text,
+              timestamp: Date.now(),
+              ...(images?.length ? { images } : {}),
+            },
+          ]);
+        }
+        return;
+      }
+
+      if (!activeId) return;
+
+      // Check engine of the active session
+      const activeSessionEngine = sessionsRef.current.find(s => s.id === activeId)?.engine ?? "claude";
+
+      if (activeSessionEngine === "acp") {
+        // ACP sessions: send through ACP hook if live
+        if (liveSessionIdsRef.current.has(activeId)) {
+          await acp.send(text, images);
+          return;
+        }
+        // ACP session dead (app restarted) — attempt revival via session/load
+        await reviveAcpSession(text, images);
+        return;
+      }
+
+      // Claude SDK path
+      if (liveSessionIdsRef.current.has(activeId)) {
+        const sent = await claude.send(text, images);
+        if (sent) return;
+        liveSessionIdsRef.current.delete(activeId);
+      }
+
+      if (activeSessionIdRef.current !== DRAFT_ID) {
+        await reviveSession(text, images);
+        return;
+      }
+    },
+    [claude.send, claude.setMessages, acp.send, acp.setMessages, acp.setIsProcessing, engine.setMessages, materializeDraft, reviveSession],
+  );
+
+  const deselectSession = useCallback(async () => {
+    abandonEagerSession();
+    await saveCurrentSession();
+    seedBackgroundStore();
+    setActiveSessionId(null);
+    setDraftProjectId(null);
+    setInitialMessages([]);
+    setInitialMeta(null);
+    setSessions((prev) => prev.map((s) => ({ ...s, isActive: false })));
+  }, [saveCurrentSession, seedBackgroundStore, abandonEagerSession]);
+
+  const isDraft = activeSessionId === DRAFT_ID;
+  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
+
+  return {
+    sessions,
+    activeSessionId,
+    activeSession,
+    isDraft,
+    draftProjectId,
+    createSession,
+    switchSession,
+    deselectSession,
+    deleteSession,
+    renameSession,
+    importCCSession,
+    setActiveModel,
+    setActivePermissionMode,
+    setDraftAgent,
+    messages: engine.messages,
+    isProcessing: engine.isProcessing,
+    isConnected: engine.isConnected || isDraft,
+    sessionInfo: engine.sessionInfo,
+    totalCost: engine.totalCost,
+    send,
+    stop: engine.stop,
+    interrupt: engine.interrupt,
+    pendingPermission: engine.pendingPermission,
+    respondPermission: engine.respondPermission,
+    contextUsage: engine.contextUsage,
+    isCompacting: engine.isCompacting,
+    compact: engine.compact,
+    acpConfigOptions: acp.configOptions,
+    setACPConfig: acp.setConfig,
+    mcpServerStatuses: isACP
+      ? (acpMcpStatuses.length > 0 ? acpMcpStatuses : draftMcpStatuses)
+      : (claude.mcpServerStatuses.length > 0 ? claude.mcpServerStatuses : draftMcpStatuses),
+    mcpStatusPreliminary: isDraft && draftMcpStatuses.length > 0 && (
+      isACP ? acpMcpStatuses.length === 0 : claude.mcpServerStatuses.length === 0
+    ),
+    refreshMcpStatus: isACP
+      ? (() => Promise.resolve())
+      : (preStartedSessionId && isDraft)
+        ? (async () => {
+            const result = await window.claude.mcpStatus(preStartedSessionId);
+            if (result.servers?.length) {
+              setDraftMcpStatuses(result.servers.map(s => ({
+                name: s.name,
+                status: toMcpStatusState(s.status),
+              })));
+            }
+          })
+        : claude.refreshMcpStatus,
+    reconnectMcpServer: isACP
+      ? isDraft
+        ? async (_name: string) => {
+            // ACP draft: re-probe to pick up auth changes
+            if (draftProjectIdRef.current) await probeMcpServers(draftProjectIdRef.current);
+          }
+        : async (_name: string) => {
+            // ACP live: restart session so fresh auth tokens are applied
+            const currentId = activeSessionIdRef.current;
+            const session = sessionsRef.current.find(s => s.id === currentId);
+            if (!session) return;
+            const servers = await window.claude.mcp.list(session.projectId);
+            await restartAcpSession(servers);
+          }
+      : (preStartedSessionId && isDraft)
+        ? (async (name: string) => {
+            const result = await window.claude.mcpReconnect(preStartedSessionId, name);
+            if (result?.restarted) {
+              await new Promise(r => setTimeout(r, 3000));
+            }
+            const statusResult = await window.claude.mcpStatus(preStartedSessionId);
+            if (statusResult.servers?.length) {
+              setDraftMcpStatuses(statusResult.servers.map(s => ({
+                name: s.name,
+                status: toMcpStatusState(s.status),
+              })));
+            }
+          })
+        : claude.reconnectMcpServer,
+    restartWithMcpServers: isACP
+      ? isDraft
+        ? async (servers: McpServerConfig[]) => {
+            // ACP draft: reprobe with new server list
+            if (draftProjectIdRef.current) {
+              await probeMcpServers(draftProjectIdRef.current, servers);
+            }
+          }
+        : async (servers: McpServerConfig[]) => {
+            // ACP live: stop + restart session with updated MCP servers
+            await restartAcpSession(servers);
+          }
+      : (preStartedSessionId && isDraft)
+        ? async (_servers: McpServerConfig[]) => {
+            // Claude eager draft: stop old eager session and start fresh
+            abandonEagerSession();
+            setDraftMcpStatuses(_servers.map(s => ({
+              name: s.name,
+              status: "pending" as const,
+            })));
+            if (draftProjectIdRef.current) {
+              eagerStartSession(draftProjectIdRef.current, startOptionsRef.current);
+            }
+          }
+        : claude.restartWithMcpServers,
+  };
+}

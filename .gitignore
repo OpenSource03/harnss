@@ -1,0 +1,9 @@
+node_modules/
+dist/
+electron/dist/
+logs/
+*.log
+.DS_Store
+docs/
+opcode-reference/
+release/

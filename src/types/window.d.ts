@@ -1,0 +1,189 @@
+import type { ClaudeEvent } from "./protocol";
+import type {
+  CCSessionInfo, PersistedSession, Project, UIMessage, Space,
+  SearchMessageResult, SearchSessionResult,
+  GitRepoInfo, GitStatus, GitBranch, GitLogEntry,
+  AgentDefinition, McpServerConfig, McpServerStatus,
+} from "./ui";
+import type { ACPSessionEvent, ACPPermissionEvent, ACPTurnCompleteEvent, ACPConfigOption } from "./acp";
+
+interface SessionListItem {
+  id: string;
+  projectId: string;
+  title: string;
+  createdAt: number;
+  model?: string;
+  totalCost: number;
+  engine?: "claude" | "acp";
+}
+
+declare global {
+  interface Window {
+    claude: {
+      getGlassEnabled: () => Promise<boolean>;
+      start: (options?: {
+        cwd?: string;
+        model?: string;
+        permissionMode?: string;
+        resume?: string;
+        mcpServers?: McpServerConfig[];
+      }) => Promise<{ sessionId: string; pid: number }>;
+      send: (
+        sessionId: string,
+        message: { type: string; message: { role: string; content: string | Array<{ type: string; [key: string]: unknown }> } },
+      ) => Promise<{ ok?: boolean; error?: string }>;
+      stop: (sessionId: string) => Promise<{ ok: boolean }>;
+      interrupt: (sessionId: string) => Promise<{ ok?: boolean; error?: string }>;
+      mcpStatus: (sessionId: string) => Promise<{ servers: McpServerStatus[]; error?: string }>;
+      mcpReconnect: (sessionId: string, serverName: string) => Promise<{ ok?: boolean; error?: string; restarted?: boolean }>;
+      restartSession: (sessionId: string, mcpServers?: McpServerConfig[]) => Promise<{ ok?: boolean; error?: string; restarted?: boolean }>;
+      readFile: (filePath: string) => Promise<{ content?: string; error?: string }>;
+      openInEditor: (filePath: string, line?: number) => Promise<{ ok?: boolean; editor?: string; error?: string }>;
+      generateTitle: (
+        message: string,
+        cwd?: string,
+      ) => Promise<{ title?: string; error?: string }>;
+      log: (label: string, data: unknown) => void;
+      onEvent: (callback: (event: ClaudeEvent & { _sessionId: string }) => void) => () => void;
+      onStderr: (callback: (data: { data: string; _sessionId: string }) => void) => () => void;
+      onExit: (callback: (data: { code: number | null; _sessionId: string }) => void) => () => void;
+      onPermissionRequest: (
+        callback: (data: {
+          _sessionId: string;
+          requestId: string;
+          toolName: string;
+          toolInput: Record<string, unknown>;
+          toolUseId: string;
+          suggestions?: string[];
+          decisionReason?: string;
+        }) => void,
+      ) => () => void;
+      respondPermission: (
+        sessionId: string,
+        requestId: string,
+        behavior: "allow" | "deny",
+        toolUseId: string,
+        toolInput: Record<string, unknown>,
+        newPermissionMode?: string,
+      ) => Promise<{ ok?: boolean; error?: string }>;
+      setPermissionMode: (
+        sessionId: string,
+        permissionMode: string,
+      ) => Promise<{ ok?: boolean; error?: string }>;
+      projects: {
+        list: () => Promise<Project[]>;
+        create: () => Promise<Project | null>;
+        delete: (projectId: string) => Promise<{ ok?: boolean; error?: string }>;
+        rename: (projectId: string, name: string) => Promise<{ ok?: boolean; error?: string }>;
+        updateSpace: (projectId: string, spaceId: string) => Promise<{ ok?: boolean; error?: string }>;
+        reorder: (projectId: string, targetProjectId: string) => Promise<{ ok?: boolean; error?: string }>;
+      };
+      sessions: {
+        save: (data: PersistedSession) => Promise<{ ok?: boolean; error?: string }>;
+        load: (projectId: string, sessionId: string) => Promise<PersistedSession | null>;
+        list: (projectId: string) => Promise<SessionListItem[]>;
+        delete: (projectId: string, sessionId: string) => Promise<{ ok?: boolean; error?: string }>;
+        search: (projectIds: string[], query: string) => Promise<{
+          messageResults: SearchMessageResult[];
+          sessionResults: SearchSessionResult[];
+        }>;
+      };
+      spaces: {
+        list: () => Promise<Space[]>;
+        save: (spaces: Space[]) => Promise<{ ok?: boolean; error?: string }>;
+      };
+      ccSessions: {
+        list: (projectPath: string) => Promise<CCSessionInfo[]>;
+        import: (projectPath: string, ccSessionId: string) => Promise<{
+          messages?: UIMessage[];
+          ccSessionId?: string;
+          error?: string;
+        }>;
+      };
+      files: {
+        list: (cwd: string) => Promise<{ files: string[]; dirs: string[] }>;
+        readMultiple: (
+          cwd: string,
+          paths: string[],
+        ) => Promise<
+          Array<
+            | { path: string; content: string; isDir?: false; error?: undefined }
+            | { path: string; isDir: true; tree: string; error?: undefined }
+            | { path: string; error: string; content?: undefined; isDir?: undefined }
+          >
+        >;
+      };
+      git: {
+        discoverRepos: (projectPath: string) => Promise<GitRepoInfo[]>;
+        status: (cwd: string) => Promise<GitStatus & { error?: string }>;
+        stage: (cwd: string, files: string[]) => Promise<{ ok?: boolean; error?: string }>;
+        unstage: (cwd: string, files: string[]) => Promise<{ ok?: boolean; error?: string }>;
+        stageAll: (cwd: string) => Promise<{ ok?: boolean; error?: string }>;
+        unstageAll: (cwd: string) => Promise<{ ok?: boolean; error?: string }>;
+        discard: (cwd: string, files: string[]) => Promise<{ ok?: boolean; error?: string }>;
+        commit: (cwd: string, message: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
+        branches: (cwd: string) => Promise<GitBranch[] & { error?: string }>;
+        checkout: (cwd: string, branch: string) => Promise<{ ok?: boolean; error?: string }>;
+        createBranch: (cwd: string, name: string) => Promise<{ ok?: boolean; error?: string }>;
+        push: (cwd: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
+        pull: (cwd: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
+        fetch: (cwd: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
+        diffFile: (cwd: string, file: string, staged: boolean) => Promise<{ diff?: string; error?: string }>;
+        log: (cwd: string, count?: number) => Promise<GitLogEntry[]>;
+        generateCommitMessage: (cwd: string) => Promise<{ message?: string; error?: string }>;
+      };
+      terminal: {
+        create: (options: { cwd?: string; cols?: number; rows?: number }) => Promise<{ terminalId?: string; error?: string }>;
+        write: (terminalId: string, data: string) => Promise<{ ok?: boolean; error?: string }>;
+        resize: (terminalId: string, cols: number, rows: number) => Promise<{ ok?: boolean; error?: string }>;
+        destroy: (terminalId: string) => Promise<{ ok?: boolean }>;
+        onData: (callback: (data: { terminalId: string; data: string }) => void) => () => void;
+        onExit: (callback: (data: { terminalId: string; exitCode: number }) => void) => () => void;
+      };
+      acp: {
+        log: (label: string, data: unknown) => void;
+        start: (options: { agentId: string; cwd: string; mcpServers?: McpServerConfig[] }) => Promise<{
+          sessionId?: string;
+          agentSessionId?: string;
+          agentName?: string;
+          configOptions?: ACPConfigOption[];
+          mcpStatuses?: Array<{ name: string; status: string }>;
+          error?: string;
+        }>;
+        prompt: (sessionId: string, text: string, images?: unknown[]) => Promise<{ ok?: boolean; error?: string }>;
+        stop: (sessionId: string) => Promise<{ ok?: boolean; error?: string }>;
+        reloadSession: (sessionId: string, mcpServers?: McpServerConfig[]) => Promise<{ ok?: boolean; supportsLoad?: boolean; error?: string }>;
+        reviveSession: (options: { agentId: string; cwd: string; agentSessionId?: string; mcpServers?: McpServerConfig[] }) => Promise<{ sessionId?: string; agentSessionId?: string; usedLoad?: boolean; configOptions?: ACPConfigOption[]; mcpStatuses?: Array<{ name: string; status: string }>; error?: string }>;
+        cancel: (sessionId: string) => Promise<{ ok?: boolean; error?: string }>;
+        respondPermission: (sessionId: string, requestId: string, optionId: string) => Promise<{ ok?: boolean; error?: string }>;
+        setConfig: (sessionId: string, configId: string, value: string) => Promise<{ configOptions?: ACPConfigOption[]; error?: string }>;
+        getConfigOptions: (sessionId: string) => Promise<{ configOptions?: ACPConfigOption[] }>;
+        onEvent: (callback: (data: ACPSessionEvent) => void) => () => void;
+        onPermissionRequest: (callback: (data: ACPPermissionEvent) => void) => () => void;
+        onTurnComplete: (callback: (data: ACPTurnCompleteEvent) => void) => () => void;
+        onExit: (callback: (data: { _sessionId: string; code: number | null }) => void) => () => void;
+      };
+      mcp: {
+        list: (projectId: string) => Promise<McpServerConfig[]>;
+        add: (projectId: string, server: McpServerConfig) => Promise<{ ok?: boolean; error?: string }>;
+        remove: (projectId: string, name: string) => Promise<{ ok?: boolean; error?: string }>;
+        authenticate: (serverName: string, serverUrl: string) => Promise<{ ok?: boolean; error?: string }>;
+        authStatus: (serverName: string) => Promise<{ hasToken: boolean; expiresAt?: number }>;
+        probe: (servers: McpServerConfig[]) => Promise<Array<{ name: string; status: "connected" | "needs-auth" | "failed"; error?: string }>>;
+      };
+      agents: {
+        list: () => Promise<AgentDefinition[]>;
+        save: (agent: AgentDefinition) => Promise<{ ok?: boolean; error?: string }>;
+        delete: (id: string) => Promise<{ ok?: boolean; error?: string }>;
+      };
+      updater: {
+        onUpdateAvailable: (cb: (info: { version: string; releaseNotes?: string }) => void) => () => void;
+        onDownloadProgress: (cb: (progress: { percent: number; bytesPerSecond: number; total: number; transferred: number }) => void) => () => void;
+        onUpdateDownloaded: (cb: (info: { version: string }) => void) => () => void;
+        download: () => Promise<unknown>;
+        install: () => Promise<void>;
+        check: () => Promise<unknown>;
+      };
+    };
+  }
+}

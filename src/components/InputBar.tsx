@@ -1,0 +1,844 @@
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  memo,
+  type KeyboardEvent,
+} from "react";
+import {
+  ArrowUp,
+  Brain,
+  ChevronDown,
+  File,
+  Folder,
+  Paperclip,
+  Shield,
+  Square,
+  X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import type { ImageAttachment, ContextUsage, AgentDefinition, ACPConfigOption } from "@/types";
+import { flattenConfigOptions } from "@/types/acp";
+
+const MODELS = [
+  { id: "claude-opus-4-6", label: "Opus 4.6" },
+  { id: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5" },
+  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+] as const;
+
+const PERMISSION_MODES = [
+  { id: "plan", label: "Plan" },
+  { id: "default", label: "Ask Before Edits" },
+  { id: "acceptEdits", label: "Accept Edits" },
+  { id: "dontAsk", label: "Don't Ask" },
+  { id: "bypassPermissions", label: "Allow All" },
+] as const;
+
+const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+type AcceptedMediaType = (typeof ACCEPTED_IMAGE_TYPES)[number];
+
+function readFileAsBase64(file: globalThis.File): Promise<{ data: string; mediaType: AcceptedMediaType }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(",")[1];
+      resolve({ data: base64, mediaType: file.type as AcceptedMediaType });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function isAcceptedImage(file: globalThis.File): boolean {
+  return (ACCEPTED_IMAGE_TYPES as readonly string[]).includes(file.type);
+}
+
+function formatTokenCount(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
+  return String(count);
+}
+
+function getContextColor(percent: number): string {
+  if (percent >= 80) return "text-red-400";
+  if (percent >= 60) return "text-amber-400";
+  return "text-muted-foreground/60";
+}
+
+function getContextStrokeColor(percent: number): string {
+  if (percent >= 80) return "stroke-red-400";
+  if (percent >= 60) return "stroke-amber-400";
+  return "stroke-foreground/40";
+}
+
+// Lucide SVG paths for inline chip icons (can't use React components in DOM-created elements)
+const FILE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3 w-3 shrink-0 text-muted-foreground"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>`;
+const FOLDER_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3 w-3 shrink-0 text-blue-400"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>`;
+
+interface InputBarProps {
+  onSend: (text: string, images?: ImageAttachment[]) => void;
+  onStop: () => void;
+  isProcessing: boolean;
+  model: string;
+  thinking: boolean;
+  permissionMode: string;
+  onModelChange: (model: string) => void;
+  onThinkingChange: (thinking: boolean) => void;
+  onPermissionModeChange: (mode: string) => void;
+  projectPath?: string;
+  contextUsage?: ContextUsage | null;
+  isCompacting?: boolean;
+  onCompact?: () => void;
+  agents?: AgentDefinition[];
+  selectedAgent?: AgentDefinition | null;
+  onAgentChange?: (agent: AgentDefinition | null) => void;
+  acpConfigOptions?: ACPConfigOption[];
+  onACPConfigChange?: (configId: string, value: string) => void;
+}
+
+// Simple fuzzy match: all query chars must appear in order
+function fuzzyMatch(query: string, target: string): { match: boolean; score: number } {
+  const q = query.toLowerCase();
+  const t = target.toLowerCase();
+
+  if (t.startsWith(q)) return { match: true, score: 100 + (1 / target.length) };
+  if (t.includes(q)) return { match: true, score: 50 + (1 / target.length) };
+
+  let qi = 0;
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) qi++;
+  }
+  if (qi === q.length) return { match: true, score: 10 + (qi / target.length) };
+
+  return { match: false, score: 0 };
+}
+
+/** Extract full text + mention paths from a contentEditable element */
+function extractEditableContent(el: HTMLElement): { text: string; mentionPaths: string[] } {
+  let text = "";
+  const mentionPaths: string[] = [];
+
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += node.textContent ?? "";
+    } else if (node instanceof HTMLElement) {
+      const mentionPath = node.dataset.mentionPath;
+      if (mentionPath) {
+        text += `@${mentionPath}`;
+        mentionPaths.push(mentionPath);
+      } else if (node.tagName === "BR") {
+        text += "\n";
+      } else {
+        for (const child of node.childNodes) walk(child);
+      }
+    }
+  };
+
+  for (const child of el.childNodes) walk(child);
+  return { text, mentionPaths: [...new Set(mentionPaths)] };
+}
+
+export const InputBar = memo(function InputBar({
+  onSend,
+  onStop,
+  isProcessing,
+  model,
+  thinking,
+  permissionMode,
+  onModelChange,
+  onThinkingChange,
+  onPermissionModeChange,
+  projectPath,
+  contextUsage,
+  isCompacting,
+  onCompact,
+  agents,
+  selectedAgent,
+  onAgentChange,
+  acpConfigOptions,
+  onACPConfigChange,
+}: InputBarProps) {
+  const [hasContent, setHasContent] = useState(false);
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [fileCache, setFileCache] = useState<{ files: string[]; dirs: string[] } | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const editableRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const mentionListRef = useRef<HTMLDivElement>(null);
+  const mentionStartNode = useRef<Node | null>(null);
+  const mentionStartOffset = useRef<number>(0);
+  const fileCachePathRef = useRef<string | undefined>(undefined);
+
+  const selectedModel = MODELS.find((m) => m.id === model) ?? MODELS[0];
+  const selectedMode =
+    PERMISSION_MODES.find((m) => m.id === permissionMode) ?? PERMISSION_MODES[0];
+  const isACPAgent = selectedAgent != null && selectedAgent.engine === "acp";
+
+  // Fetch file list when projectPath changes
+  useEffect(() => {
+    if (!projectPath || fileCachePathRef.current === projectPath) return;
+    fileCachePathRef.current = projectPath;
+    window.claude.files.list(projectPath).then((result) => {
+      setFileCache(result);
+    });
+  }, [projectPath]);
+
+  // Filtered mention results
+  const mentionResults = useCallback(() => {
+    if (!fileCache) return [];
+    const q = mentionQuery;
+    const allEntries = [
+      ...fileCache.dirs.map((d) => ({ path: d, isDir: true })),
+      ...fileCache.files.map((f) => ({ path: f, isDir: false })),
+    ];
+
+    // Filter out paths already mentioned as chips
+    const mentionedPaths = new Set<string>();
+    if (editableRef.current) {
+      editableRef.current.querySelectorAll("[data-mention-path]").forEach((el) => {
+        const p = el.getAttribute("data-mention-path");
+        if (p) mentionedPaths.add(p);
+      });
+    }
+    const available = allEntries.filter((e) => !mentionedPaths.has(e.path));
+
+    if (!q) {
+      return available
+        .sort((a, b) => {
+          const aDepth = a.path.split("/").length;
+          const bDepth = b.path.split("/").length;
+          if (aDepth !== bDepth) return aDepth - bDepth;
+          if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+          return a.path.localeCompare(b.path);
+        })
+        .slice(0, 12);
+    }
+
+    return available
+      .map((entry) => {
+        const { match, score } = fuzzyMatch(q, entry.path);
+        return { ...entry, match, score };
+      })
+      .filter((e) => e.match)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 12);
+  }, [fileCache, mentionQuery]);
+
+  const results = showMentions ? mentionResults() : [];
+
+  // Clamp mention index
+  useEffect(() => {
+    if (mentionIndex >= results.length) {
+      setMentionIndex(Math.max(0, results.length - 1));
+    }
+  }, [results.length, mentionIndex]);
+
+  // Scroll active mention into view
+  useEffect(() => {
+    if (!mentionListRef.current) return;
+    const active = mentionListRef.current.querySelector("[data-active='true']");
+    active?.scrollIntoView({ block: "nearest" });
+  }, [mentionIndex]);
+
+  const closeMentions = useCallback(() => {
+    setShowMentions(false);
+    setMentionQuery("");
+    setMentionIndex(0);
+    mentionStartNode.current = null;
+    mentionStartOffset.current = 0;
+  }, []);
+
+  const addImageFiles = useCallback(async (files: FileList | globalThis.File[]) => {
+    const validFiles = Array.from(files).filter(isAcceptedImage);
+    if (validFiles.length === 0) return;
+
+    const newAttachments: ImageAttachment[] = [];
+    for (const file of validFiles) {
+      const { data, mediaType } = await readFileAsBase64(file);
+      newAttachments.push({
+        id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        data,
+        mediaType,
+        fileName: file.name,
+      });
+    }
+    setAttachments((prev) => [...prev, ...newAttachments]);
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  const selectMention = useCallback(
+    (entry: { path: string; isDir: boolean }) => {
+      const el = editableRef.current;
+      const node = mentionStartNode.current;
+      const sel = window.getSelection();
+      if (!el || !node || !sel || !sel.rangeCount) {
+        closeMentions();
+        return;
+      }
+
+      // Delete the @query text (from @ to current cursor position)
+      const range = document.createRange();
+      range.setStart(node, mentionStartOffset.current);
+      const curRange = sel.getRangeAt(0);
+      range.setEnd(curRange.startContainer, curRange.startOffset);
+      range.deleteContents();
+
+      // Create chip element
+      const chip = document.createElement("span");
+      chip.contentEditable = "false";
+      chip.className =
+        "mention-chip inline-flex items-center gap-1 rounded-md bg-accent/60 px-1.5 py-0.5 text-xs text-accent-foreground font-mono align-baseline cursor-default select-none";
+      chip.setAttribute("data-mention-path", entry.path);
+      chip.setAttribute("data-mention-dir", String(entry.isDir));
+      chip.innerHTML = `${entry.isDir ? FOLDER_ICON_SVG : FILE_ICON_SVG}<span>${entry.path}</span>`;
+
+      // Insert chip at cursor
+      range.insertNode(chip);
+
+      // Add space after chip so cursor has somewhere to go
+      const space = document.createTextNode(" ");
+      chip.after(space);
+
+      // Move cursor after the space
+      const newRange = document.createRange();
+      newRange.setStartAfter(space);
+      newRange.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(newRange);
+
+      setHasContent(true);
+      closeMentions();
+    },
+    [closeMentions],
+  );
+
+  const handleSend = useCallback(async () => {
+    const el = editableRef.current;
+    if (!el) return;
+
+    const { text: fullText, mentionPaths } = extractEditableContent(el);
+    const trimmed = fullText.trim();
+    if ((!trimmed && attachments.length === 0) || isProcessing || isSending) return;
+
+    const currentImages = attachments.length > 0 ? [...attachments] : undefined;
+
+    if (mentionPaths.length > 0 && projectPath) {
+      setIsSending(true);
+      try {
+        const fileResults = await window.claude.files.readMultiple(projectPath, mentionPaths);
+
+        const contextParts: string[] = [];
+        for (const result of fileResults) {
+          if (result.error) {
+            contextParts.push(`<file path="${result.path}">\n[Error: ${result.error}]\n</file>`);
+          } else if (result.isDir && result.tree) {
+            contextParts.push(`<folder path="${result.path}">\n${result.tree}\n</folder>`);
+          } else if (!result.isDir && result.content !== undefined) {
+            contextParts.push(`<file path="${result.path}">\n${result.content}\n</file>`);
+          }
+        }
+
+        const contextBlock = contextParts.join("\n\n");
+        const fullMessage = contextBlock ? `${contextBlock}\n\n${trimmed}` : trimmed;
+        onSend(fullMessage, currentImages);
+      } finally {
+        setIsSending(false);
+      }
+    } else {
+      onSend(trimmed, currentImages);
+    }
+
+    // Clear input
+    el.innerHTML = "";
+    setHasContent(false);
+    setAttachments([]);
+    closeMentions();
+  }, [attachments, isProcessing, isSending, projectPath, onSend, closeMentions]);
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (showMentions && results.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionIndex((prev) => (prev + 1) % results.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIndex((prev) => (prev - 1 + results.length) % results.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        selectMention(results[mentionIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeMentions();
+        return;
+      }
+    }
+
+    if (e.key === "Enter" && e.shiftKey) {
+      e.preventDefault();
+      document.execCommand("insertLineBreak");
+      return;
+    }
+
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!isProcessing && !isSending) {
+        handleSend();
+      }
+    }
+  };
+
+  // Detect @ trigger on contentEditable input
+  const handleEditableInput = useCallback(() => {
+    const el = editableRef.current;
+    if (!el) return;
+
+    // Update hasContent for placeholder & send button
+    const hasText =
+      (el.textContent?.trim().length ?? 0) > 0 ||
+      el.querySelector("[data-mention-path]") !== null;
+    setHasContent(hasText);
+
+    // Detect @ trigger
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) {
+      if (showMentions) closeMentions();
+      return;
+    }
+
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+
+    if (node.nodeType !== Node.TEXT_NODE) {
+      if (showMentions) closeMentions();
+      return;
+    }
+
+    const textBefore = (node.textContent ?? "").slice(0, range.startOffset);
+    const atMatch = textBefore.match(/(^|[\s])@([^\s]*)$/);
+
+    if (atMatch && projectPath) {
+      mentionStartNode.current = node;
+      mentionStartOffset.current = textBefore.lastIndexOf("@");
+      setMentionQuery(atMatch[2]);
+      setShowMentions(true);
+      setMentionIndex(0);
+    } else {
+      if (showMentions) closeMentions();
+    }
+  }, [showMentions, closeMentions, projectPath]);
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLDivElement>) => {
+      const items = e.clipboardData?.items;
+      if (items) {
+        const imageFiles: globalThis.File[] = [];
+        for (const item of items) {
+          if (item.kind === "file" && isAcceptedImage(item.getAsFile()!)) {
+            imageFiles.push(item.getAsFile()!);
+          }
+        }
+        if (imageFiles.length > 0) {
+          e.preventDefault();
+          addImageFiles(imageFiles);
+          return;
+        }
+      }
+
+      // Paste as plain text only (strip HTML formatting)
+      e.preventDefault();
+      const text = e.clipboardData.getData("text/plain");
+      document.execCommand("insertText", false, text);
+      setHasContent(true);
+    },
+    [addImageFiles],
+  );
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+      if (e.dataTransfer?.files) {
+        addImageFiles(e.dataTransfer.files);
+      }
+    },
+    [addImageFiles],
+  );
+
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files) {
+        addImageFiles(e.target.files);
+      }
+      e.target.value = "";
+    },
+    [addImageFiles],
+  );
+
+  return (
+    <div className="mx-auto w-full max-w-3xl px-4 pb-4">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        multiple
+        className="hidden"
+        onChange={handleFileInputChange}
+      />
+      <div
+        className={`pointer-events-auto rounded-2xl border bg-background/55 shadow-lg backdrop-blur-lg transition-colors focus-within:border-border ${
+          isDragging
+            ? "border-primary/60 bg-primary/5"
+            : "border-border/60"
+        }`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {/* Mention popup */}
+        {showMentions && results.length > 0 && (
+          <div
+            ref={mentionListRef}
+            className="mx-2 mb-1 mt-2 max-h-64 overflow-y-auto rounded-lg border border-border/60 bg-popover shadow-lg"
+          >
+            {results.map((entry, i) => (
+              <button
+                key={entry.path}
+                data-active={i === mentionIndex}
+                className={`flex w-full items-center gap-2 px-3 py-1.5 text-start text-sm transition-colors ${
+                  i === mentionIndex
+                    ? "bg-accent text-accent-foreground"
+                    : "text-popover-foreground hover:bg-muted/40"
+                }`}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  selectMention(entry);
+                }}
+                onMouseEnter={() => setMentionIndex(i)}
+              >
+                {entry.isDir ? (
+                  <Folder className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+                ) : (
+                  <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )}
+                <span className="truncate font-mono text-xs">{entry.path}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Input area — contentEditable with inline chip support */}
+        <div
+          className="relative px-4 pt-3.5 pb-2"
+          onClick={() => editableRef.current?.focus()}
+        >
+          {/* Placeholder (shown when input is empty) */}
+          {!hasContent && (
+            <div className="pointer-events-none absolute inset-0 flex items-start px-4 pt-3.5 pb-2 text-sm text-muted-foreground/50">
+              {isCompacting
+                ? "Compacting context..."
+                : isProcessing
+                  ? `${selectedAgent?.name ?? "Claude"} is responding...`
+                  : "Ask anything, @ to tag files"}
+            </div>
+          )}
+          <div
+            ref={editableRef}
+            contentEditable
+            onInput={handleEditableInput}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            className="min-h-[1.5em] max-h-[200px] overflow-y-auto text-sm text-foreground outline-none whitespace-pre-wrap wrap-break-word"
+            role="textbox"
+            aria-multiline="true"
+            suppressContentEditableWarning
+          />
+        </div>
+
+        {/* Attachment previews */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-4 pb-2">
+            {attachments.map((att) => (
+              <div
+                key={att.id}
+                className="group/att relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border/40"
+              >
+                <img
+                  src={`data:${att.mediaType};base64,${att.data}`}
+                  alt={att.fileName ?? "attachment"}
+                  className="h-full w-full object-cover"
+                />
+                <button
+                  onClick={() => removeAttachment(att.id)}
+                  className="absolute -end-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/90 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground group-hover/att:opacity-100"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-1 px-3 pb-2.5">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center justify-center rounded-lg px-2 py-1 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+            title="Attach image"
+          >
+            <Paperclip className="h-3.5 w-3.5" />
+          </button>
+
+          {agents && agents.length > 1 && onAgentChange && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground">
+                  {selectedAgent?.name ?? "Claude Code"}
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {agents.map((agent) => (
+                  <DropdownMenuItem
+                    key={agent.id}
+                    onClick={() => onAgentChange(agent.engine === "claude" ? null : agent)}
+                    className={
+                      (selectedAgent?.id ?? "claude-code") === agent.id ? "bg-accent" : ""
+                    }
+                  >
+                    {agent.name}
+                    {agent.engine === "acp" && (
+                      <span className="ms-1.5 text-[10px] text-muted-foreground">ACP</span>
+                    )}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
+          {isACPAgent ? (
+            /* ACP agent config dropdowns — dynamically rendered from agent-provided options */
+            acpConfigOptions && acpConfigOptions.length > 0 && onACPConfigChange && (
+              <>
+                {acpConfigOptions.map((opt) => {
+                  const flat = flattenConfigOptions(opt.options);
+                  const current = flat.find((o) => o.value === opt.currentValue);
+                  return (
+                    <DropdownMenu key={opt.id}>
+                      <DropdownMenuTrigger asChild>
+                        <button className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground">
+                          {current?.name ?? opt.currentValue}
+                          <ChevronDown className="h-3 w-3" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start">
+                        {flat.map((o) => (
+                          <DropdownMenuItem
+                            key={o.value}
+                            onClick={() => onACPConfigChange(opt.id, o.value)}
+                            className={o.value === opt.currentValue ? "bg-accent" : ""}
+                          >
+                            <div>
+                              <div>{o.name}</div>
+                              {o.description && (
+                                <div className="text-[10px] text-muted-foreground">{o.description}</div>
+                              )}
+                            </div>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  );
+                })}
+              </>
+            )
+          ) : (
+            /* Claude SDK controls — hardcoded model, permission mode, thinking */
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground">
+                    {selectedModel.label}
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {MODELS.map((m) => (
+                    <DropdownMenuItem
+                      key={m.id}
+                      onClick={() => onModelChange(m.id)}
+                      className={m.id === model ? "bg-accent" : ""}
+                    >
+                      {m.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground">
+                    <Shield className="h-3 w-3" />
+                    {selectedMode.label}
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {PERMISSION_MODES.map((m) => (
+                    <DropdownMenuItem
+                      key={m.id}
+                      onClick={() => onPermissionModeChange(m.id)}
+                      className={m.id === permissionMode ? "bg-accent" : ""}
+                    >
+                      {m.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <button
+                onClick={() => onThinkingChange(!thinking)}
+                className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors ${
+                  thinking
+                    ? "text-foreground bg-muted/40"
+                    : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                }`}
+              >
+                <Brain className="h-3 w-3" />
+                Reasoning
+              </button>
+            </>
+          )}
+
+          <div className="ms-auto flex items-center gap-1.5">
+            {contextUsage && (() => {
+              const totalInput = contextUsage.inputTokens + contextUsage.cacheReadTokens + contextUsage.cacheCreationTokens;
+              const percent = Math.min(100, (totalInput / contextUsage.contextWindow) * 100);
+              const radius = 7;
+              const circumference = 2 * Math.PI * radius;
+              const dashOffset = circumference - (percent / 100) * circumference;
+              return (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={onCompact}
+                      disabled={isProcessing}
+                      className={`flex items-center justify-center rounded-full p-0.5 transition-colors hover:bg-muted/40 disabled:opacity-40 disabled:pointer-events-none ${getContextColor(percent)}`}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 20 20" className={isCompacting ? "animate-spin" : "-rotate-90"}>
+                        <circle
+                          cx="10" cy="10" r={radius}
+                          fill="none"
+                          className="stroke-muted/30"
+                          strokeWidth="2.5"
+                        />
+                        <circle
+                          cx="10" cy="10" r={radius}
+                          fill="none"
+                          className={isCompacting ? "stroke-foreground/60" : getContextStrokeColor(percent)}
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeDasharray={circumference}
+                          strokeDashoffset={isCompacting ? circumference * 0.7 : dashOffset}
+                        />
+                      </svg>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-64">
+                    <div className="space-y-1.5 text-xs">
+                      <div className="font-medium">{isCompacting ? "Compacting..." : `Context: ${percent.toFixed(1)}%`}</div>
+                      <div className="space-y-0.5 opacity-70">
+                        <div className="flex justify-between gap-4">
+                          <span>Input tokens</span>
+                          <span className="font-mono">{formatTokenCount(contextUsage.inputTokens)}</span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span>Cache read</span>
+                          <span className="font-mono">{formatTokenCount(contextUsage.cacheReadTokens)}</span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span>Cache creation</span>
+                          <span className="font-mono">{formatTokenCount(contextUsage.cacheCreationTokens)}</span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span>Output tokens</span>
+                          <span className="font-mono">{formatTokenCount(contextUsage.outputTokens)}</span>
+                        </div>
+                      </div>
+                      <div className="flex justify-between gap-4 border-t border-background/20 pt-1">
+                        <span>Total / Window</span>
+                        <span className="font-mono">{formatTokenCount(totalInput)} / {formatTokenCount(contextUsage.contextWindow)}</span>
+                      </div>
+                      <div className="border-t border-background/20 pt-1.5 opacity-50">
+                        Click to compact context
+                      </div>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })()}
+            {isProcessing ? (
+              <Button
+                size="icon"
+                variant="destructive"
+                onClick={onStop}
+                className="h-8 w-8 rounded-full"
+              >
+                <Square className="h-3.5 w-3.5" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                onClick={handleSend}
+                disabled={(!hasContent && attachments.length === 0) || isSending}
+                className="h-8 w-8 rounded-full"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});

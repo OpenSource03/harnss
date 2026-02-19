@@ -1,0 +1,789 @@
+import { useState, useCallback, useEffect, useRef } from "react";
+import type {
+  ClaudeEvent,
+  SystemInitEvent,
+  SystemCompactBoundaryEvent,
+  AuthStatusEvent,
+  AssistantMessageEvent,
+  ToolResultEvent,
+  ResultEvent,
+  UIMessage,
+  SessionInfo,
+  SubagentToolStep,
+  PermissionRequest,
+  ImageAttachment,
+  ContextUsage,
+  McpServerStatus,
+  McpServerConfig,
+} from "../types";
+import { toMcpStatusState } from "../types/ui";
+import { StreamingBuffer } from "../lib/streaming-buffer";
+import {
+  getParentId,
+  extractTextContent,
+  extractThinkingContent,
+  normalizeToolResult,
+  buildSdkContent,
+} from "../lib/protocol";
+
+function uiLog(label: string, data: unknown) {
+  window.claude.log(label, typeof data === "string" ? data : JSON.stringify(data));
+}
+
+let idCounter = 0;
+function nextId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${idCounter++}`;
+}
+
+// Maps a parent_tool_use_id (Task tool_use_id) → the tool_call message id
+type ParentToolMap = Map<string, string>;
+
+interface InitialMeta {
+  isProcessing: boolean;
+  isConnected: boolean;
+  sessionInfo: SessionInfo | null;
+  totalCost: number;
+}
+
+interface UseClaudeOptions {
+  sessionId: string | null;
+  initialMessages?: UIMessage[];
+  initialMeta?: InitialMeta | null;
+}
+
+export function useClaude({ sessionId, initialMessages, initialMeta }: UseClaudeOptions) {
+  const [messages, setMessages] = useState<UIMessage[]>(initialMessages ?? []);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null);
+  const [totalCost, setTotalCost] = useState(0);
+  const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null);
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+  const [isCompacting, setIsCompacting] = useState(false);
+  const [mcpServerStatuses, setMcpServerStatuses] = useState<McpServerStatus[]>([]);
+
+  const buffer = useRef(new StreamingBuffer());
+  const parentToolMap = useRef<ParentToolMap>(new Map());
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+
+  // Reset state when sessionId changes, restoring background state if available
+  useEffect(() => {
+    const msgs = initialMessages ?? [];
+    setMessages(msgs);
+    if (initialMeta) {
+      setIsProcessing(initialMeta.isProcessing);
+      setIsConnected(initialMeta.isConnected);
+      setSessionInfo(initialMeta.sessionInfo);
+      setTotalCost(initialMeta.totalCost);
+    } else {
+      setIsProcessing(false);
+      setIsConnected(false);
+      setSessionInfo(null);
+      setTotalCost(0);
+    }
+    setPendingPermission(null);
+    setContextUsage(null);
+    setIsCompacting(false);
+    buffer.current.reset();
+    parentToolMap.current.clear();
+
+    // If restoring a mid-stream session, seed the buffer with existing content
+    // so that new deltas are appended rather than replacing old content.
+    const streamingMsg = msgs.findLast(
+      (m) => m.role === "assistant" && m.isStreaming,
+    );
+    if (streamingMsg) {
+      buffer.current.messageId = streamingMsg.id;
+      buffer.current.seedFromRestore(
+        streamingMsg.content,
+        streamingMsg.thinking,
+      );
+    }
+  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // rAF-based flush
+  const pendingFlush = useRef(false);
+  const rafId = useRef(0);
+
+  const flushStreamingToState = useCallback(() => {
+    const allText = buffer.current.getAllText();
+    const allThinking = buffer.current.getAllThinking();
+    const { thinkingComplete } = buffer.current;
+    setMessages((prev) => {
+      const streamId = buffer.current.messageId;
+      const target = streamId
+        ? prev.find((m) => m.id === streamId)
+        : prev.findLast((m) => m.role === "assistant" && m.isStreaming);
+      if (!target) return prev;
+      if (!streamId) buffer.current.messageId = target.id;
+      const contentChanged = allText !== target.content;
+      const thinkingChanged = allThinking && allThinking !== (target.thinking ?? "");
+      const thinkingCompleteChanged = thinkingComplete && !target.thinkingComplete;
+      if (!contentChanged && !thinkingChanged && !thinkingCompleteChanged) return prev;
+      return prev.map((m) =>
+        m.id === target.id
+          ? {
+              ...m,
+              ...(contentChanged ? { content: allText } : {}),
+              ...(thinkingChanged ? { thinking: allThinking } : {}),
+              ...(thinkingCompleteChanged ? { thinkingComplete: true } : {}),
+            }
+          : m,
+      );
+    });
+  }, []);
+
+  const scheduleFlush = useCallback(() => {
+    if (pendingFlush.current) return;
+    pendingFlush.current = true;
+    rafId.current = requestAnimationFrame(() => {
+      pendingFlush.current = false;
+      flushStreamingToState();
+    });
+  }, [flushStreamingToState]);
+
+  const flushNow = useCallback(() => {
+    if (pendingFlush.current) {
+      cancelAnimationFrame(rafId.current);
+      pendingFlush.current = false;
+    }
+    flushStreamingToState();
+  }, [flushStreamingToState]);
+
+  const resetStreaming = useCallback(() => {
+    buffer.current.reset();
+    if (pendingFlush.current) {
+      cancelAnimationFrame(rafId.current);
+      pendingFlush.current = false;
+    }
+  }, []);
+
+  const handleSubagentEvent = useCallback((event: ClaudeEvent, parentId: string) => {
+    const taskMsgId = parentToolMap.current.get(parentId);
+    if (!taskMsgId) return;
+
+    if (event.type === "assistant") {
+      const assistantEvent = event as AssistantMessageEvent;
+      for (const block of assistantEvent.message.content) {
+        if (block.type === "tool_use") {
+          const step: SubagentToolStep = {
+            toolName: block.name,
+            toolInput: block.input,
+            toolUseId: block.id,
+          };
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== taskMsgId) return m;
+              return { ...m, subagentSteps: [...(m.subagentSteps ?? []), step] };
+            }),
+          );
+        }
+      }
+    } else if (event.type === "user") {
+      const userEvent = event as ToolResultEvent;
+      const uc = userEvent.message.content;
+      if (Array.isArray(uc) && uc[0]?.type === "tool_result") {
+        const toolUseId = uc[0].tool_use_id;
+        const isError = !!uc[0].is_error;
+        const resultMeta = normalizeToolResult(
+          userEvent.tool_use_result,
+          uc[0].content,
+        );
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== taskMsgId) return m;
+            const steps = (m.subagentSteps ?? []).map((s) =>
+              s.toolUseId === toolUseId ? { ...s, toolResult: resultMeta, toolError: isError || undefined } : s,
+            );
+            return { ...m, subagentSteps: steps };
+          }),
+        );
+      }
+    }
+  }, []);
+
+  const handleEvent = useCallback(
+    (event: ClaudeEvent & { _sessionId?: string }) => {
+      // Filter events by sessionId
+      if (event._sessionId && event._sessionId !== sessionIdRef.current) return;
+
+      const parentId = getParentId(event);
+
+      if (parentId) {
+        handleSubagentEvent(event, parentId);
+        return;
+      }
+
+      switch (event.type) {
+        case "system": {
+          if ("subtype" in event && event.subtype === "compact_boundary") {
+            const compactMeta = (event as SystemCompactBoundaryEvent).compact_metadata;
+            uiLog("COMPACT_BOUNDARY", { session: event.session_id, trigger: compactMeta?.trigger, preTokens: compactMeta?.pre_tokens });
+            setIsCompacting(false);
+            // Insert a compact marker message so the UI shows it
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: nextId("compact"),
+                role: "summary",
+                content: "",
+                timestamp: Date.now(),
+                compactTrigger: compactMeta?.trigger === "manual" ? "manual" : "auto",
+                compactPreTokens: compactMeta?.pre_tokens,
+              },
+            ]);
+            break;
+          }
+          if ("subtype" in event && event.subtype === "status") {
+            break;
+          }
+          const init = event as SystemInitEvent;
+          uiLog("SYSTEM_INIT", { session: init.session_id?.slice(0, 8), model: init.model, mcpServers: init.mcp_servers?.length ?? 0 });
+          setSessionInfo({
+            sessionId: init.session_id,
+            model: init.model,
+            cwd: init.cwd,
+            tools: init.tools,
+            version: init.claude_code_version,
+            permissionMode: init.permissionMode,
+          });
+          if (init.mcp_servers?.length) {
+            setMcpServerStatuses(init.mcp_servers.map((s) => ({
+              name: s.name,
+              status: toMcpStatusState(s.status),
+            })));
+            // Auto-refresh detailed MCP status after a short delay (auth flows may still be in progress)
+            const sid = sessionIdRef.current;
+            if (sid) {
+              setTimeout(() => {
+                window.claude.mcpStatus(sid).then((result) => {
+                  if (result.servers?.length) {
+                    setMcpServerStatuses(result.servers as McpServerStatus[]);
+                  }
+                }).catch(() => { /* session may have been stopped */ });
+              }, 3000);
+            }
+          }
+          setIsConnected(true);
+          setIsProcessing(true);
+          break;
+        }
+
+        case "stream_event": {
+          const { event: streamEvt } = event;
+
+          switch (streamEvt.type) {
+            case "message_start": {
+              resetStreaming();
+              const id = nextId("stream");
+              buffer.current.messageId = id;
+              uiLog("MSG_START", { id });
+              setMessages((prev) => [
+                ...prev,
+                { id, role: "assistant" as const, content: "", isStreaming: true, timestamp: Date.now() },
+              ]);
+              break;
+            }
+
+            case "content_block_start": {
+              buffer.current.startBlock(streamEvt.index, streamEvt.content_block);
+              break;
+            }
+
+            case "content_block_delta": {
+              const needsFlush = buffer.current.appendDelta(streamEvt.index, streamEvt.delta);
+              if (needsFlush) scheduleFlush();
+              break;
+            }
+
+            case "content_block_stop": {
+              const { index } = streamEvt;
+              const thinkingDone = buffer.current.stopBlock(index);
+              if (thinkingDone) scheduleFlush();
+              const toolMeta = buffer.current.getToolMeta(index);
+              if (toolMeta) {
+                const rawInput = buffer.current.getRawToolInput(index);
+                let parsedInput: Record<string, unknown> = {};
+                try {
+                  parsedInput = JSON.parse(rawInput);
+                } catch {
+                  parsedInput = { raw: rawInput };
+                }
+
+                const isTask = toolMeta.name === "Task";
+                const msgId = `tool-${toolMeta.id}`;
+
+                setMessages((prev) => {
+                  if (prev.some((m) => m.id === msgId)) return prev;
+                  return [
+                    ...prev,
+                    {
+                      id: msgId,
+                      role: "tool_call",
+                      content: "",
+                      toolName: toolMeta.name,
+                      toolInput: parsedInput,
+                      timestamp: Date.now(),
+                      ...(isTask ? { subagentSteps: [], subagentStatus: "running" as const } : {}),
+                    },
+                  ];
+                });
+
+                if (isTask) {
+                  parentToolMap.current.set(toolMeta.id, msgId);
+                  uiLog("TASK_REGISTERED", { toolId: toolMeta.id, msgId });
+                }
+              }
+              break;
+            }
+
+            case "message_delta": {
+              flushNow();
+              setMessages((prev) => {
+                const streamId = buffer.current.messageId;
+                const target = streamId
+                  ? prev.find((m) => m.id === streamId)
+                  : prev.findLast((m) => m.role === "assistant" && m.isStreaming);
+                if (!target) return prev;
+                if (!target.content.trim() && !target.thinking) {
+                  return prev.filter((m) => m.id !== target.id);
+                }
+                return prev.map((m) =>
+                  m.id === target.id ? { ...m, isStreaming: false } : m,
+                );
+              });
+              break;
+            }
+
+            case "message_stop": {
+              resetStreaming();
+              break;
+            }
+          }
+          break;
+        }
+
+        case "assistant": {
+          flushNow();
+          uiLog("ASSISTANT_MSG", { uuid: event.uuid?.slice(0, 12) });
+
+          // Extract per-message usage for context tracking
+          const msgUsage = (event.message as AssistantMessageEvent["message"] & {
+            usage?: {
+              input_tokens?: number;
+              output_tokens?: number;
+              cache_read_input_tokens?: number;
+              cache_creation_input_tokens?: number;
+            };
+          }).usage;
+          if (msgUsage) {
+            setContextUsage((prev) => ({
+              inputTokens: msgUsage.input_tokens ?? 0,
+              outputTokens: msgUsage.output_tokens ?? 0,
+              cacheReadTokens: msgUsage.cache_read_input_tokens ?? 0,
+              cacheCreationTokens: msgUsage.cache_creation_input_tokens ?? 0,
+              contextWindow: prev?.contextWindow ?? 200_000,
+            }));
+          }
+
+          const textContent = extractTextContent(event.message.content);
+          const thinkingContent = extractThinkingContent(event.message.content);
+
+          setMessages((prev) => {
+            const streamId = buffer.current.messageId;
+            const target = streamId
+              ? prev.find((m) => m.id === streamId)
+              : prev.findLast((m) => m.role === "assistant" && m.isStreaming);
+
+            if (target) {
+              if (!streamId) buffer.current.messageId = target.id;
+              const merged = {
+                ...target,
+                content: textContent || target.content,
+                thinking: thinkingContent || target.thinking || undefined,
+                ...(thinkingContent ? { thinkingComplete: true } : {}),
+              };
+              if (!merged.content.trim() && !merged.thinking) {
+                return prev.filter((m) => m.id !== target.id);
+              }
+              return prev.map((m) => (m.id === target.id ? merged : m));
+            }
+
+            if (textContent || thinkingContent) {
+              return [
+                ...prev,
+                {
+                  id: `assistant-${event.uuid}`,
+                  role: "assistant",
+                  content: textContent,
+                  thinking: thinkingContent || undefined,
+                  ...(thinkingContent ? { thinkingComplete: true } : {}),
+                  isStreaming: false,
+                  timestamp: Date.now(),
+                },
+              ];
+            }
+            return prev;
+          });
+
+          for (const block of event.message.content) {
+            if (block.type === "tool_use") {
+              const isTask = block.name === "Task";
+              const msgId = `tool-${block.id}`;
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === msgId)) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: msgId,
+                    role: "tool_call",
+                    content: "",
+                    toolName: block.name,
+                    toolInput: block.input,
+                    timestamp: Date.now(),
+                    ...(isTask ? { subagentSteps: [], subagentStatus: "running" as const } : {}),
+                  },
+                ];
+              });
+              if (isTask) {
+                parentToolMap.current.set(block.id, msgId);
+                uiLog("TASK_REGISTERED", { toolId: block.id, msgId });
+              }
+            }
+          }
+          break;
+        }
+
+        case "user": {
+          const rawContent = event.message.content;
+
+          // content can be a string (e.g. after compact_boundary) or an array
+          if (typeof rawContent === "string") {
+            // String content — context summary after compact_boundary
+            if (rawContent.trim()) {
+              uiLog("CONTEXT_SUMMARY", { length: rawContent.length });
+              setMessages((prev) => {
+                const compactIdx = prev.findLastIndex(
+                  (m) => m.role === "summary" && m.id.startsWith("compact-") && !m.content,
+                );
+                if (compactIdx >= 0) {
+                  return prev.map((m, i) =>
+                    i === compactIdx ? { ...m, content: rawContent } : m,
+                  );
+                }
+                return [
+                  ...prev,
+                  {
+                    id: nextId("summary"),
+                    role: "summary",
+                    content: rawContent,
+                    timestamp: Date.now(),
+                  },
+                ];
+              });
+            }
+          } else if (Array.isArray(rawContent) && rawContent[0]?.type === "tool_result") {
+            const toolResult = rawContent[0];
+            const toolUseId = toolResult.tool_use_id;
+            const isError = !!toolResult.is_error;
+            const resultMeta = normalizeToolResult(event.tool_use_result, toolResult.content);
+            uiLog("TOOL_RESULT", {
+              tool_use_id: toolUseId?.slice(0, 12),
+              isAsync: resultMeta?.isAsync,
+              status: resultMeta?.status,
+              isError,
+            });
+
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== `tool-${toolUseId}`) return m;
+                if (m.toolName === "Task" && resultMeta) {
+                  return {
+                    ...m,
+                    toolResult: resultMeta,
+                    toolError: isError || undefined,
+                    subagentStatus: "completed" as const,
+                    subagentId: resultMeta.agentId,
+                    subagentDurationMs: resultMeta.totalDurationMs,
+                    subagentTokens: resultMeta.totalTokens,
+                  };
+                }
+                return { ...m, toolResult: resultMeta, toolError: isError || undefined };
+              }),
+            );
+          } else if (Array.isArray(rawContent)) {
+            // Text content user event — context summary after compact_boundary
+            const textBlocks = rawContent.filter(
+              (b): b is { type: "text"; text: string } => b.type === "text",
+            );
+            if (textBlocks.length) {
+              const summaryText = textBlocks
+                .map((b) => b.text)
+                .join("\n");
+              uiLog("CONTEXT_SUMMARY", { length: summaryText.length });
+              setMessages((prev) => {
+                const compactIdx = prev.findLastIndex(
+                  (m) => m.role === "summary" && m.id.startsWith("compact-") && !m.content,
+                );
+                if (compactIdx >= 0) {
+                  return prev.map((m, i) =>
+                    i === compactIdx ? { ...m, content: summaryText } : m,
+                  );
+                }
+                return [
+                  ...prev,
+                  {
+                    id: nextId("summary"),
+                    role: "summary",
+                    content: summaryText,
+                    timestamp: Date.now(),
+                  },
+                ];
+              });
+            }
+          }
+          break;
+        }
+
+        case "result": {
+          uiLog("RESULT", { subtype: event.subtype, cost: event.total_cost_usd, turns: event.num_turns });
+          setIsProcessing(false);
+          setTotalCost((prev) => prev + (event.total_cost_usd ?? 0));
+
+          // Extract contextWindow from modelUsage if available
+          const resultEvent = event as ResultEvent;
+          if (resultEvent.modelUsage) {
+            const entries = Object.values(resultEvent.modelUsage);
+            const primaryEntry = entries.find((e) => e.contextWindow > 0);
+            if (primaryEntry) {
+              setContextUsage((prev) =>
+                prev ? { ...prev, contextWindow: primaryEntry.contextWindow } : prev,
+              );
+            }
+          }
+
+          resetStreaming();
+          break;
+        }
+
+        case "auth_status": {
+          const authEvt = event as AuthStatusEvent;
+          uiLog("AUTH_STATUS", { isAuthenticating: authEvt.isAuthenticating, error: authEvt.error, output: authEvt.output?.length ?? 0 });
+          // After auth completes, refresh MCP server statuses
+          if (!authEvt.isAuthenticating && sessionIdRef.current) {
+            window.claude.mcpStatus(sessionIdRef.current).then((result) => {
+              if (result.servers?.length) {
+                setMcpServerStatuses(result.servers as McpServerStatus[]);
+              }
+            }).catch(() => { /* session may have been stopped */ });
+          }
+          break;
+        }
+      }
+    },
+    [resetStreaming, scheduleFlush, flushNow, handleSubagentEvent],
+  );
+
+  const send = useCallback(
+    async (text: string, images?: ImageAttachment[]): Promise<boolean> => {
+      if (!sessionIdRef.current) return false;
+      setIsProcessing(true);
+      const content = buildSdkContent(text, images);
+      const result = await window.claude.send(sessionIdRef.current, {
+        type: "user",
+        message: { role: "user", content },
+      });
+      if (result?.error) {
+        setIsProcessing(false);
+        return false;
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: nextId("user"),
+          role: "user",
+          content: text,
+          timestamp: Date.now(),
+          ...(images?.length ? { images } : {}),
+        },
+      ]);
+      return true;
+    },
+    [],
+  );
+
+  const stop = useCallback(async () => {
+    if (!sessionIdRef.current) return;
+    await window.claude.stop(sessionIdRef.current);
+    setIsConnected(false);
+    setIsProcessing(false);
+    setIsCompacting(false);
+    resetStreaming();
+  }, [resetStreaming]);
+
+  const interrupt = useCallback(async () => {
+    if (!sessionIdRef.current) return;
+
+    // Flush any rAF-buffered streaming content to React state
+    flushNow();
+
+    // Interrupt the current turn via IPC (session stays alive)
+    await window.claude.interrupt(sessionIdRef.current);
+
+    // Responsive UI — don't wait for the result event
+    setIsProcessing(false);
+    setIsCompacting(false);
+    setPendingPermission(null);
+
+    // Finalize streaming message: keep partial content, remove if empty
+    setMessages((prev) => {
+      const streamId = buffer.current.messageId;
+      const target = streamId
+        ? prev.find((m) => m.id === streamId)
+        : prev.findLast((m) => m.role === "assistant" && m.isStreaming);
+      if (!target) return prev;
+      if (!target.content.trim() && !target.thinking) {
+        return prev.filter((m) => m.id !== target.id);
+      }
+      return prev.map((m) =>
+        m.id === target.id ? { ...m, isStreaming: false } : m,
+      );
+    });
+
+    // Reset streaming buffer for next turn
+    resetStreaming();
+  }, [flushNow, resetStreaming]);
+
+  const respondPermission = useCallback(
+    async (behavior: "allow" | "deny", updatedInput?: Record<string, unknown>, newPermissionMode?: string) => {
+      if (!pendingPermission || !sessionIdRef.current) return;
+      await window.claude.respondPermission(
+        sessionIdRef.current,
+        pendingPermission.requestId,
+        behavior,
+        pendingPermission.toolUseId,
+        updatedInput ?? pendingPermission.toolInput,
+        newPermissionMode,
+      );
+      if (newPermissionMode) {
+        setSessionInfo((prev) => prev ? { ...prev, permissionMode: newPermissionMode } : prev);
+      }
+      setPendingPermission(null);
+    },
+    [pendingPermission],
+  );
+
+  useEffect(() => {
+    const unsubEvent = window.claude.onEvent(handleEvent);
+    const unsubPermission = window.claude.onPermissionRequest((data) => {
+      if (data._sessionId !== sessionIdRef.current) return;
+      uiLog("PERMISSION_REQUEST", { tool: data.toolName, requestId: data.requestId });
+      setPendingPermission({
+        requestId: data.requestId,
+        toolName: data.toolName,
+        toolInput: data.toolInput,
+        toolUseId: data.toolUseId,
+        suggestions: data.suggestions,
+        decisionReason: data.decisionReason,
+      });
+    });
+    const unsubExit = window.claude.onExit((data) => {
+      if (data._sessionId !== sessionIdRef.current) return;
+      setIsConnected(false);
+      setIsProcessing(false);
+      setIsCompacting(false);
+      setPendingPermission(null);
+      if (data.code !== 0 && data.code !== null) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextId("system-exit"),
+            role: "system",
+            content: `Process exited with code ${data.code}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+    });
+    return () => {
+      unsubEvent();
+      unsubPermission();
+      unsubExit();
+      if (pendingFlush.current) {
+        cancelAnimationFrame(rafId.current);
+      }
+    };
+  }, [handleEvent]);
+
+  const setPermissionMode = useCallback(async (mode: string) => {
+    if (!sessionIdRef.current) return;
+    const result = await window.claude.setPermissionMode(sessionIdRef.current, mode);
+    if (result?.ok) {
+      setSessionInfo((prev) => prev ? { ...prev, permissionMode: mode } : prev);
+    }
+  }, []);
+
+  const compact = useCallback(async () => {
+    if (!sessionIdRef.current) return;
+    setIsCompacting(true);
+    setIsProcessing(true);
+    await window.claude.send(sessionIdRef.current, {
+      type: "user",
+      message: { role: "user", content: "/compact" },
+    });
+  }, []);
+
+  const refreshMcpStatus = useCallback(async () => {
+    if (!sessionIdRef.current) return;
+    const result = await window.claude.mcpStatus(sessionIdRef.current);
+    if (result.servers?.length) {
+      setMcpServerStatuses(result.servers as McpServerStatus[]);
+    }
+  }, []);
+
+  const reconnectMcpServer = useCallback(async (serverName: string) => {
+    if (!sessionIdRef.current) return;
+    const result = await window.claude.mcpReconnect(sessionIdRef.current, serverName);
+    // If the session was restarted (to inject fresh OAuth tokens),
+    // wait for the new session to fully initialize before refreshing status
+    if (result?.restarted) {
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    await refreshMcpStatus();
+  }, [refreshMcpStatus]);
+
+  /** Restart the session with a fresh MCP server list (after add/remove) */
+  const restartWithMcpServers = useCallback(async (mcpServers: McpServerConfig[]) => {
+    if (!sessionIdRef.current) return;
+    const result = await window.claude.restartSession(sessionIdRef.current, mcpServers);
+    if (result?.restarted) {
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    await refreshMcpStatus();
+  }, [refreshMcpStatus]);
+
+  return {
+    messages,
+    setMessages,
+    isProcessing,
+    isConnected,
+    setIsConnected,
+    sessionInfo,
+    totalCost,
+    setTotalCost,
+    contextUsage,
+    isCompacting,
+    send,
+    stop,
+    interrupt,
+    compact,
+    pendingPermission,
+    respondPermission,
+    setPermissionMode,
+    mcpServerStatuses,
+    refreshMcpStatus,
+    reconnectMcpServer,
+    restartWithMcpServers,
+  };
+}

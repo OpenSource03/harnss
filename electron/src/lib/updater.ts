@@ -1,0 +1,76 @@
+import { app, ipcMain, BrowserWindow } from "electron";
+import { autoUpdater } from "electron-updater";
+import type { UpdateInfo, ProgressInfo } from "electron-updater";
+import { log } from "./logger";
+
+export function initAutoUpdater(
+  getMainWindow: () => BrowserWindow | null,
+): void {
+  if (!app.isPackaged) return;
+
+  autoUpdater.logger = {
+    info: (msg: unknown) => log("UPDATER", String(msg)),
+    warn: (msg: unknown) => log("UPDATER_WARN", String(msg)),
+    error: (msg: unknown) => log("UPDATER_ERR", String(msg)),
+    debug: (msg: unknown) => log("UPDATER_DEBUG", String(msg)),
+  };
+
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("update-available", (info: UpdateInfo) => {
+    log("UPDATER", `Update available: ${info.version}`);
+    const win = getMainWindow();
+    win?.webContents.send("updater:update-available", {
+      version: info.version,
+      releaseNotes: info.releaseNotes,
+    });
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    log("UPDATER", "No update available");
+  });
+
+  autoUpdater.on("download-progress", (progress: ProgressInfo) => {
+    const win = getMainWindow();
+    win?.webContents.send("updater:download-progress", {
+      percent: progress.percent,
+      bytesPerSecond: progress.bytesPerSecond,
+      total: progress.total,
+      transferred: progress.transferred,
+    });
+  });
+
+  autoUpdater.on("update-downloaded", (info: UpdateInfo) => {
+    log("UPDATER", `Update downloaded: ${info.version}`);
+    const win = getMainWindow();
+    win?.webContents.send("updater:update-downloaded", {
+      version: info.version,
+    });
+  });
+
+  autoUpdater.on("error", (err: Error) => {
+    log("UPDATER_ERR", `Update error: ${err.message}`);
+  });
+
+  // IPC handlers for renderer
+  ipcMain.handle("updater:download", () => autoUpdater.downloadUpdate());
+  ipcMain.handle("updater:install", () => autoUpdater.quitAndInstall());
+  ipcMain.handle("updater:check", () => autoUpdater.checkForUpdates());
+
+  // Check 5s after startup, then every 4 hours
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((err: Error) => {
+      log("UPDATER_ERR", `Check failed: ${err.message}`);
+    });
+  }, 5000);
+
+  setInterval(
+    () => {
+      autoUpdater.checkForUpdates().catch((err: Error) => {
+        log("UPDATER_ERR", `Periodic check failed: ${err.message}`);
+      });
+    },
+    4 * 60 * 60 * 1000,
+  );
+}

@@ -1,0 +1,201 @@
+import { memo, type ReactNode } from "react";
+import { File, Folder, Info } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { UIMessage } from "@/types";
+import { ThinkingBlock } from "./ThinkingBlock";
+import { CopyButton } from "./CopyButton";
+import type { ComponentPropsWithoutRef } from "react";
+
+// Stable references to avoid re-creating on every render
+const REMARK_PLUGINS = [remarkGfm];
+import type { Components } from "react-markdown";
+
+const MD_COMPONENTS: Components = {
+  code: CodeBlock,
+  pre: ({ children }) => <>{children}</>,
+};
+const SYNTAX_STYLE: React.CSSProperties = {
+  margin: 0,
+  borderRadius: 0,
+  background: "transparent",
+  fontSize: "12px",
+  padding: "12px",
+};
+
+/** Strip `<file path="...">...</file>` and `<folder path="...">...</folder>` context blocks from user messages */
+function stripFileContext(text: string): string {
+  let result = text.replace(/<file path="[^"]*">[\s\S]*?<\/file>\s*/g, "");
+  result = result.replace(/<folder path="[^"]*">[\s\S]*?<\/folder>\s*/g, "");
+  return result.trim();
+}
+
+/** Render @path references as styled inline badges */
+function renderWithMentions(text: string): ReactNode[] {
+  // Match @path/to/file or @path/to/dir/
+  const parts = text.split(/(@[\w./_-]+\/?)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("@") && part.length > 1) {
+      const filePath = part.slice(1);
+      const isDir = filePath.endsWith("/");
+      return (
+        <span
+          key={i}
+          className="inline-flex items-baseline gap-0.5 rounded bg-accent/50 px-1 py-px font-mono text-xs text-accent-foreground"
+        >
+          {isDir ? (
+            <Folder className="inline h-3 w-3 shrink-0 self-center text-blue-400" />
+          ) : (
+            <File className="inline h-3 w-3 shrink-0 self-center text-muted-foreground" />
+          )}
+          {filePath}
+        </span>
+      );
+    }
+    return part;
+  });
+}
+
+interface MessageBubbleProps {
+  message: UIMessage;
+  isContinuation?: boolean;
+}
+
+export const MessageBubble = memo(function MessageBubble({ message, isContinuation }: MessageBubbleProps) {
+  if (message.role === "system") {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-1 text-center text-xs text-muted-foreground">
+        <div className="inline-flex items-center gap-1.5">
+          <Info className="h-3 w-3" />
+          {message.content}
+        </div>
+      </div>
+    );
+  }
+
+  const isUser = message.role === "user";
+  const time = new Date(message.timestamp).toLocaleTimeString();
+
+  if (isUser) {
+    const displayContent = stripFileContext(message.content);
+    return (
+      <div className="flex justify-end px-4 py-1.5">
+        <div className="max-w-[80%]">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="rounded-2xl rounded-tr-sm bg-foreground/[0.06] px-3.5 py-2 text-sm text-foreground wrap-break-word whitespace-pre-wrap">
+                {message.images && message.images.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {message.images.map((img) => (
+                      <img
+                        key={img.id}
+                        src={`data:${img.mediaType};base64,${img.data}`}
+                        alt={img.fileName ?? "attached image"}
+                        className="max-h-48 rounded-lg"
+                      />
+                    ))}
+                  </div>
+                )}
+                {renderWithMentions(displayContent)}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              <p className="text-xs">{time}</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+    );
+  }
+
+  // Assistant message
+  return (
+    <div className={`flex justify-start px-4 ${isContinuation ? "py-0.5" : "py-1.5"}`}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="min-w-0 max-w-[85%] wrap-break-word">
+            {message.thinking && (
+              <ThinkingBlock
+                thinking={message.thinking}
+                isStreaming={message.isStreaming}
+                thinkingComplete={message.thinkingComplete}
+              />
+            )}
+            {message.content ? (
+              <div className="prose prose-invert prose-sm max-w-none text-foreground">
+                <ReactMarkdown
+                  remarkPlugins={REMARK_PLUGINS}
+                  components={MD_COMPONENTS}
+                >
+                  {message.content}
+                </ReactMarkdown>
+              </div>
+            ) : message.isStreaming && !message.thinking ? (
+              <span className="inline-block h-4 w-1.5 animate-pulse rounded-sm bg-foreground/40" />
+            ) : null}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          <p className="text-xs">{time}</p>
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}, (prev, next) =>
+  prev.message.content === next.message.content &&
+  prev.message.thinking === next.message.thinking &&
+  prev.message.isStreaming === next.message.isStreaming &&
+  prev.message.thinkingComplete === next.message.thinkingComplete &&
+  prev.message.images === next.message.images &&
+  prev.isContinuation === next.isContinuation,
+);
+
+type CodeBlockProps = ComponentPropsWithoutRef<"code"> & {
+  inline?: boolean;
+};
+
+function CodeBlock({ inline, className, children, ...props }: CodeBlockProps) {
+  const match = /language-(\w+)/.exec(className || "");
+  const code = String(children).replace(/\n$/, "");
+
+  if (!inline && match) {
+    return (
+      <div className="group/code relative my-2 rounded-lg bg-foreground/[0.03] overflow-hidden">
+        <div className="flex items-center justify-between bg-foreground/[0.04] px-3 py-1">
+          <span className="text-[11px] text-muted-foreground">{match[1]}</span>
+          <CopyButton text={code} className="opacity-0 transition-opacity group-hover/code:opacity-100" />
+        </div>
+        <SyntaxHighlighter
+          style={oneDark}
+          language={match[1]}
+          PreTag="div"
+          customStyle={SYNTAX_STYLE}
+        >
+          {code}
+        </SyntaxHighlighter>
+      </div>
+    );
+  }
+
+  if (!inline && code.includes("\n")) {
+    return (
+      <div className="group/code relative my-2 rounded-lg bg-foreground/[0.03] overflow-hidden">
+        <div className="flex items-center justify-end bg-foreground/[0.04] px-3 py-1">
+          <CopyButton text={code} className="opacity-0 transition-opacity group-hover/code:opacity-100" />
+        </div>
+        <pre className="overflow-x-auto p-3 text-xs">
+          <code {...props}>{code}</code>
+        </pre>
+      </div>
+    );
+  }
+
+  return (
+    <code className="rounded bg-foreground/[0.08] px-1.5 py-0.5 text-xs" {...props}>
+      {children}
+    </code>
+  );
+}
