@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useProjectManager } from "@/hooks/useProjectManager";
@@ -13,11 +13,6 @@ import { InputBar } from "./InputBar";
 import { PermissionPrompt } from "./PermissionPrompt";
 import { TodoPanel } from "./TodoPanel";
 import { BackgroundAgentsPanel } from "./BackgroundAgentsPanel";
-import { ToolsPanel } from "./ToolsPanel";
-import { BrowserPanel } from "./BrowserPanel";
-import { GitPanel } from "./GitPanel";
-import { FilesPanel } from "./FilesPanel";
-import { McpPanel } from "./McpPanel";
 import { ToolPicker } from "./ToolPicker";
 import type { ToolId } from "./ToolPicker";
 import { WelcomeScreen } from "./WelcomeScreen";
@@ -25,6 +20,13 @@ import { SpaceCreator } from "./SpaceCreator";
 import { useBackgroundAgents } from "@/hooks/useBackgroundAgents";
 import { useAgentRegistry } from "@/hooks/useAgentRegistry";
 import type { TodoItem, ImageAttachment, Space, SpaceColor, AgentDefinition } from "@/types";
+
+// Lazy-load tool panels — split into separate chunks, only fetched when user activates them via ToolPicker
+const ToolsPanel = lazy(() => import("./ToolsPanel").then((m) => ({ default: m.ToolsPanel })));
+const BrowserPanel = lazy(() => import("./BrowserPanel").then((m) => ({ default: m.BrowserPanel })));
+const GitPanel = lazy(() => import("./GitPanel").then((m) => ({ default: m.GitPanel })));
+const FilesPanel = lazy(() => import("./FilesPanel").then((m) => ({ default: m.FilesPanel })));
+const McpPanel = lazy(() => import("./McpPanel").then((m) => ({ default: m.McpPanel })));
 
 export function AppLayout() {
   const sidebar = useSidebar();
@@ -44,6 +46,12 @@ export function AppLayout() {
     setSelectedAgent(agent);
     manager.setDraftAgent(agent?.engine ?? "claude", agent?.id ?? "claude-code");
   }, [manager.setDraftAgent]);
+
+  // Engine is locked once a session is active (not draft) — null means free to switch
+  const lockedEngine = !manager.isDraft && manager.activeSession?.engine
+    ? manager.activeSession.engine
+    : null;
+
   const [spaceCreatorOpen, setSpaceCreatorOpen] = useState(false);
   const [editingSpace, setEditingSpace] = useState<Space | null>(null);
   const [scrollToMessageId, setScrollToMessageId] = useState<string | undefined>();
@@ -329,6 +337,22 @@ export function AppLayout() {
     }
   }, [manager.activeSessionId, manager.isDraft, manager.sessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Sync selectedAgent when switching to a different session
+  useEffect(() => {
+    if (!manager.activeSessionId || manager.isDraft) return;
+    const session = manager.sessions.find((s) => s.id === manager.activeSessionId);
+    if (!session) return;
+
+    if (session.engine === "acp" && session.agentId) {
+      const agent = agents.find((a) => a.id === session.agentId);
+      if (agent && selectedAgent?.id !== agent.id) {
+        setSelectedAgent(agent);
+      }
+    } else if (session.engine !== "acp" && selectedAgent !== null) {
+      setSelectedAgent(null);
+    }
+  }, [manager.activeSessionId, manager.isDraft, manager.sessions, agents]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Derive the latest todo list from the most recent TodoWrite tool call
   const activeTodos = useMemo(() => {
     for (let i = manager.messages.length - 1; i >= 0; i--) {
@@ -602,6 +626,8 @@ export function AppLayout() {
                     onAgentChange={handleAgentChange}
                     acpConfigOptions={manager.acpConfigOptions}
                     onACPConfigChange={manager.setACPConfig}
+                    supportedModels={manager.supportedModels}
+                    lockedEngine={lockedEngine}
                   />
                 )}
               </div>
@@ -694,6 +720,7 @@ export function AppLayout() {
               className="flex shrink-0 flex-col gap-0 overflow-hidden"
               style={{ width: settings.toolsPanelWidth }}
             >
+              <Suspense fallback={null}>
               {(() => {
                 const toolOrder: Array<{ id: string; node: React.ReactNode }> = [];
                 if (activeTools.has("terminal"))
@@ -770,6 +797,7 @@ export function AppLayout() {
                   </div>
                 ));
               })()}
+              </Suspense>
             </div>
           </>
         )}

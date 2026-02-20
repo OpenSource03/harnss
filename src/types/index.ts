@@ -38,6 +38,7 @@ export type {
   ImageAttachment,
   ContextUsage,
   AgentDefinition,
+  ModelInfo,
   GitFileStatus,
   GitFileGroup,
   GitFileChange,

@@ -1,10 +1,11 @@
 import { memo, type ReactNode } from "react";
-import { File, Folder, Info } from "lucide-react";
+import { AlertCircle, File, Folder, Info } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import type { UIMessage } from "@/types";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { CopyButton } from "./CopyButton";
@@ -66,10 +67,14 @@ interface MessageBubbleProps {
 
 export const MessageBubble = memo(function MessageBubble({ message, isContinuation }: MessageBubbleProps) {
   if (message.role === "system") {
+    const isError = message.isError;
     return (
-      <div className="mx-auto max-w-3xl px-4 py-1 text-center text-xs text-muted-foreground">
+      <div className={cn(
+        "mx-auto max-w-3xl px-4 py-1 text-center text-xs",
+        isError ? "text-destructive" : "text-muted-foreground",
+      )}>
         <div className="inline-flex items-center gap-1.5">
-          <Info className="h-3 w-3" />
+          {isError ? <AlertCircle className="h-3 w-3" /> : <Info className="h-3 w-3" />}
           {message.content}
         </div>
       </div>
@@ -150,6 +155,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
   prev.message.isStreaming === next.message.isStreaming &&
   prev.message.thinkingComplete === next.message.thinkingComplete &&
   prev.message.images === next.message.images &&
+  prev.message.isError === next.message.isError &&
   prev.isContinuation === next.isContinuation,
 );
 

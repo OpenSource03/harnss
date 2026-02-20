@@ -3,6 +3,8 @@ import path from "path";
 import http from "http";
 import { log } from "./lib/logger";
 import { glassEnabled, liquidGlass } from "./lib/glass";
+import { micaEnabled, MicaBrowserWindow, isWindows11 } from "./lib/mica";
+import type { MicaWindow } from "./lib/mica";
 import { initAutoUpdater } from "./lib/updater";
 import { sessions } from "./ipc/claude-sessions";
 import { acpSessions } from "./ipc/acp-sessions";
@@ -23,7 +25,13 @@ import * as acpSessionsIpc from "./ipc/acp-sessions";
 import * as mcpIpc from "./ipc/mcp";
 import { ipcMain } from "electron";
 
-// --- Liquid Glass command-line switches (must be set before app.whenReady()) ---
+// --- Performance: Chromium/V8 flags (must be set before app.whenReady()) ---
+app.commandLine.appendSwitch("enable-gpu-rasterization"); // force GPU raster for all content
+app.commandLine.appendSwitch("enable-zero-copy"); // avoid CPU→GPU memory copies for tiles
+app.commandLine.appendSwitch("ignore-gpu-blocklist"); // use GPU even on blocklisted hardware
+app.commandLine.appendSwitch("enable-features", "CanvasOopRasterization"); // off-main-thread canvas
+
+// --- Liquid Glass command-line switches ---
 if (glassEnabled) {
   app.commandLine.appendSwitch("remote-debugging-port", "9222");
   app.commandLine.appendSwitch("remote-allow-origins", "*");
@@ -45,20 +53,31 @@ function createWindow(): void {
       nodeIntegration: false,
       webviewTag: true,
       devTools: !glassEnabled,
+      v8CacheOptions: "bypassHeatCheckAndEagerCompile", // cache compiled JS on first run — eliminates cold-start jank
     },
   };
 
   if (glassEnabled) {
+    // macOS Tahoe+ with liquid glass
     windowOptions.titleBarStyle = "hidden";
     windowOptions.transparent = true;
     windowOptions.trafficLightPosition = { x: 16, y: 16 };
+  } else if (micaEnabled) {
+    // Windows: start hidden, show after mica effect is applied to avoid flash
+    windowOptions.autoHideMenuBar = true;
+    windowOptions.show = false;
   } else {
     windowOptions.titleBarStyle = "hiddenInset";
     windowOptions.trafficLightPosition = { x: 16, y: 16 };
     windowOptions.backgroundColor = "#18181b";
   }
 
-  mainWindow = new BrowserWindow(windowOptions);
+  // MicaBrowserWindow extends BrowserWindow with native DWM/User32 calls — must be used at construction time
+  if (micaEnabled && MicaBrowserWindow) {
+    mainWindow = new MicaBrowserWindow(windowOptions) as BrowserWindow;
+  } else {
+    mainWindow = new BrowserWindow(windowOptions);
+  }
 
   const isDev = !app.isPackaged;
   if (isDev) {
@@ -68,16 +87,35 @@ function createWindow(): void {
   }
 
   if (glassEnabled) {
+    // macOS: apply liquid glass after content loads
     mainWindow.webContents.once("did-finish-load", () => {
       const glassId = liquidGlass!.addView(mainWindow!.getNativeWindowHandle(), {});
-      log("GLASS", `Liquid glass applied, viewId=${glassId}`);
+      if (glassId === -1) {
+        log("GLASS", "addView returned -1 — native addon failed, glass will not be visible");
+      } else {
+        log("GLASS", `Liquid glass applied, viewId=${glassId}`);
+      }
+    });
+  } else if (micaEnabled) {
+    // Windows: apply Mica/Acrylic effect after DOM is ready, then show
+    const micaWin = mainWindow as unknown as MicaWindow;
+    mainWindow.webContents.once("dom-ready", () => {
+      micaWin.setDarkTheme();
+      if (isWindows11) {
+        micaWin.setMicaAcrylicEffect();
+        log("MICA", "Applied Mica Acrylic effect (Windows 11)");
+      } else {
+        micaWin.setAcrylic();
+        log("MICA", "Applied Acrylic effect (Windows 10)");
+      }
+      mainWindow!.show();
     });
   }
 }
 
-// --- Liquid Glass IPC ---
+// Renderer uses this to set `glass-enabled` CSS class → transparent backgrounds for both platforms
 ipcMain.handle("app:getGlassEnabled", () => {
-  return !!glassEnabled;
+  return !!(glassEnabled || micaEnabled);
 });
 
 // --- Register all IPC modules ---

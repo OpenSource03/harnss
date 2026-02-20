@@ -8,6 +8,9 @@
   <true/>
   <key>com.apple.security.cs.allow-dyld-environment-variables</key>
   <true/>
+  <!-- Required for loading unsigned native .node prebuilds (electron-liquid-glass, node-pty) under hardened runtime -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
   <key>com.apple.security.network.client</key>
   <true/>
   <key>com.apple.security.network.server</key>

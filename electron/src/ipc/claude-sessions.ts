@@ -1,8 +1,9 @@
 import { BrowserWindow, ipcMain } from "electron";
 import crypto from "crypto";
 import { log } from "../lib/logger";
+import { safeSend } from "../lib/safe-send";
 import { AsyncChannel } from "../lib/async-channel";
-import { getSDK } from "../lib/sdk";
+import { getSDK, getCliPath } from "../lib/sdk";
 import type { QueryHandle } from "../lib/sdk";
 import { getMcpAuthHeaders } from "../lib/mcp-oauth-flow";
 
@@ -184,7 +185,7 @@ async function restartSession(
     return new Promise<PermissionResult>((resolve) => {
       const requestId = crypto.randomUUID();
       newSession.pendingPermissions.set(requestId, { resolve });
-      getMainWindow()?.webContents.send("claude:permission_request", {
+      safeSend(getMainWindow,"claude:permission_request", {
         _sessionId: sessionId,
         requestId,
         toolName,
@@ -202,11 +203,12 @@ async function restartSession(
     thinking: { type: "enabled", budgetTokens: 16000 },
     canUseTool,
     settingSources: ["user", "project"],
+    pathToClaudeCodeExecutable: getCliPath(),
     resume: sessionId,
     stderr: (data: string) => {
       const trimmed = data.trim();
       log("STDERR", `${logPrefix} ${trimmed}`);
-      getMainWindow()?.webContents.send("claude:stderr", { data, _sessionId: sessionId });
+      safeSend(getMainWindow,"claude:stderr", { data, _sessionId: sessionId });
     },
   };
 
@@ -232,13 +234,14 @@ async function restartSession(
   } catch (err) {
     // Restart failed — clean up and notify renderer
     sessions.delete(sessionId);
-    getMainWindow()?.webContents.send("claude:exit", {
+    safeSend(getMainWindow,"claude:exit", {
       code: 1, _sessionId: sessionId, error: errorMessage(err),
     });
     return { error: `Restart failed: ${errorMessage(err)}` };
   }
 
-  // Start new event forwarding loop
+  // Start new event forwarding loop — track errors for the exit event
+  let restartQueryError: string | undefined;
   (async () => {
     try {
       for await (const message of q) {
@@ -249,15 +252,20 @@ async function restartSession(
         if (msgObj.type === "assistant" || msgObj.type === "user" || msgObj.type === "result") {
           log("EVENT_FULL", message);
         }
-        getMainWindow()?.webContents.send("claude:event", { ...(message as object), _sessionId: sessionId });
+        safeSend(getMainWindow,"claude:event", { ...(message as object), _sessionId: sessionId });
       }
     } catch (err) {
-      log("QUERY_ERROR", `${logPrefix} ${errorMessage(err)}`);
+      restartQueryError = errorMessage(err);
+      log("QUERY_ERROR", `${logPrefix} ${restartQueryError}`);
     } finally {
       if (!newSession.restarting) {
-        log("EXIT", `${logPrefix} total_events=${newSession.eventCounter}`);
+        const exitCode = restartQueryError ? 1 : 0;
+        log("EXIT", `${logPrefix} total_events=${newSession.eventCounter} error=${restartQueryError ?? "none"}`);
         sessions.delete(sessionId);
-        getMainWindow()?.webContents.send("claude:exit", { code: 0, _sessionId: sessionId });
+        safeSend(getMainWindow,"claude:exit", {
+          code: exitCode, _sessionId: sessionId,
+          ...(restartQueryError ? { error: restartQueryError } : {}),
+        });
       } else {
         log("EXIT_RESTART", `${logPrefix} old loop ended (restarting)`);
       }
@@ -272,106 +280,127 @@ async function restartSession(
 export function register(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle("claude:start", async (_event, options: StartOptions = {}) => {
     const sessionId = options.resume || crypto.randomUUID();
-    const query = await getSDK();
 
-    const channel = new AsyncChannel<unknown>();
-    const session: SessionEntry = {
-      channel,
-      queryHandle: null,
-      eventCounter: 0,
-      pendingPermissions: new Map(),
-      startOptions: options,
-    };
-    sessions.set(sessionId, session);
+    try {
+      const query = await getSDK();
 
-    const canUseTool = (toolName: string, input: unknown, context: { toolUseID: string; suggestions: unknown; decisionReason: string }) => {
-      return new Promise<PermissionResult>((resolve) => {
-        const requestId = crypto.randomUUID();
-        session.pendingPermissions.set(requestId, { resolve });
-        log("PERMISSION_REQUEST", {
-          session: sessionId.slice(0, 8),
-          tool: toolName,
-          requestId,
-          toolUseId: context.toolUseID,
-          reason: context.decisionReason,
+      const channel = new AsyncChannel<unknown>();
+      const session: SessionEntry = {
+        channel,
+        queryHandle: null,
+        eventCounter: 0,
+        pendingPermissions: new Map(),
+        startOptions: options,
+      };
+      sessions.set(sessionId, session);
+
+      const canUseTool = (toolName: string, input: unknown, context: { toolUseID: string; suggestions: unknown; decisionReason: string }) => {
+        return new Promise<PermissionResult>((resolve) => {
+          const requestId = crypto.randomUUID();
+          session.pendingPermissions.set(requestId, { resolve });
+          log("PERMISSION_REQUEST", {
+            session: sessionId.slice(0, 8),
+            tool: toolName,
+            requestId,
+            toolUseId: context.toolUseID,
+            reason: context.decisionReason,
+          });
+          safeSend(getMainWindow,"claude:permission_request", {
+            _sessionId: sessionId,
+            requestId,
+            toolName,
+            toolInput: input,
+            toolUseId: context.toolUseID,
+            suggestions: context.suggestions,
+            decisionReason: context.decisionReason,
+          });
         });
-        getMainWindow()?.webContents.send("claude:permission_request", {
-          _sessionId: sessionId,
-          requestId,
-          toolName,
-          toolInput: input,
-          toolUseId: context.toolUseID,
-          suggestions: context.suggestions,
-          decisionReason: context.decisionReason,
-        });
-      });
-    };
+      };
 
-    const queryOptions: Record<string, unknown> = {
-      cwd: options.cwd || process.cwd(),
-      includePartialMessages: true,
-      thinking: { type: "enabled", budgetTokens: 16000 },
-      canUseTool,
-      settingSources: ["user", "project"],
-      stderr: (data: string) => {
-        const trimmed = data.trim();
-        log("STDERR", `session=${sessionId.slice(0, 8)} ${trimmed}`);
-        getMainWindow()?.webContents.send("claude:stderr", { data, _sessionId: sessionId });
-      },
-    };
+      const queryOptions: Record<string, unknown> = {
+        cwd: options.cwd || process.cwd(),
+        includePartialMessages: true,
+        thinking: { type: "enabled", budgetTokens: 16000 },
+        canUseTool,
+        settingSources: ["user", "project"],
+        pathToClaudeCodeExecutable: getCliPath(),
+        stderr: (data: string) => {
+          const trimmed = data.trim();
+          log("STDERR", `session=${sessionId.slice(0, 8)} ${trimmed}`);
+          safeSend(getMainWindow,"claude:stderr", { data, _sessionId: sessionId });
+        },
+      };
 
-    if (options.resume) {
-      queryOptions.resume = options.resume;
-    } else {
-      queryOptions.sessionId = sessionId;
-    }
-
-    if (options.permissionMode) {
-      queryOptions.permissionMode = options.permissionMode;
-    }
-    if (options.permissionMode === "bypassPermissions") {
-      queryOptions.allowDangerouslySkipPermissions = true;
-    }
-    if (options.model) {
-      queryOptions.model = options.model;
-    }
-
-    if (options.mcpServers?.length) {
-      queryOptions.mcpServers = await buildSdkMcpConfig(options.mcpServers);
-    }
-
-    log("SPAWN", { sessionId, resume: options.resume || null, options: { ...queryOptions, canUseTool: "[callback]", stderr: "[callback]" } });
-
-    const q = query({ prompt: channel, options: queryOptions });
-    session.queryHandle = q;
-
-    (async () => {
-      try {
-        for await (const message of q) {
-          session.eventCounter++;
-          const summary = summarizeEvent(message as Record<string, unknown>);
-          log("EVENT", `session=${sessionId.slice(0, 8)} #${session.eventCounter} ${summary}`);
-          const msgObj = message as Record<string, unknown>;
-          if (msgObj.type === "assistant" || msgObj.type === "user" || msgObj.type === "result") {
-            log("EVENT_FULL", message);
-          }
-          getMainWindow()?.webContents.send("claude:event", { ...(message as object), _sessionId: sessionId });
-        }
-      } catch (err) {
-        log("QUERY_ERROR", `session=${sessionId.slice(0, 8)} ${errorMessage(err)}`);
-      } finally {
-        // If restarting, the new loop takes over — don't send exit or delete
-        if (!session.restarting) {
-          log("EXIT", `session=${sessionId.slice(0, 8)} total_events=${session.eventCounter}`);
-          sessions.delete(sessionId);
-          getMainWindow()?.webContents.send("claude:exit", { code: 0, _sessionId: sessionId });
-        } else {
-          log("EXIT_RESTART", `session=${sessionId.slice(0, 8)} old loop ended (restarting)`);
-        }
+      if (options.resume) {
+        queryOptions.resume = options.resume;
+      } else {
+        queryOptions.sessionId = sessionId;
       }
-    })().catch((err) => log("EVENT_LOOP_FATAL", errorMessage(err)));
 
-    return { sessionId, pid: 0 };
+      if (options.permissionMode) {
+        queryOptions.permissionMode = options.permissionMode;
+      }
+      if (options.permissionMode === "bypassPermissions") {
+        queryOptions.allowDangerouslySkipPermissions = true;
+      }
+      if (options.model) {
+        queryOptions.model = options.model;
+      }
+
+      if (options.mcpServers?.length) {
+        queryOptions.mcpServers = await buildSdkMcpConfig(options.mcpServers);
+      }
+
+      log("SPAWN", { sessionId, resume: options.resume || null, options: { ...queryOptions, canUseTool: "[callback]", stderr: "[callback]" } });
+
+      const q = query({ prompt: channel, options: queryOptions });
+      session.queryHandle = q;
+
+      // Track errors from the event loop so they can be included in the exit event
+      let queryError: string | undefined;
+
+      (async () => {
+        try {
+          for await (const message of q) {
+            session.eventCounter++;
+            const summary = summarizeEvent(message as Record<string, unknown>);
+            log("EVENT", `session=${sessionId.slice(0, 8)} #${session.eventCounter} ${summary}`);
+            const msgObj = message as Record<string, unknown>;
+            if (msgObj.type === "assistant" || msgObj.type === "user" || msgObj.type === "result") {
+              log("EVENT_FULL", message);
+            }
+            safeSend(getMainWindow,"claude:event", { ...(message as object), _sessionId: sessionId });
+          }
+        } catch (err) {
+          queryError = errorMessage(err);
+          log("QUERY_ERROR", `session=${sessionId.slice(0, 8)} ${queryError}`);
+        } finally {
+          // If restarting, the new loop takes over — don't send exit or delete
+          if (!session.restarting) {
+            const exitCode = queryError ? 1 : 0;
+            log("EXIT", `session=${sessionId.slice(0, 8)} total_events=${session.eventCounter} error=${queryError ?? "none"}`);
+            sessions.delete(sessionId);
+            safeSend(getMainWindow,"claude:exit", {
+              code: exitCode, _sessionId: sessionId,
+              ...(queryError ? { error: queryError } : {}),
+            });
+          } else {
+            log("EXIT_RESTART", `session=${sessionId.slice(0, 8)} old loop ended (restarting)`);
+          }
+        }
+      })().catch((err) => log("EVENT_LOOP_FATAL", errorMessage(err)));
+
+      return { sessionId, pid: 0 };
+    } catch (err) {
+      // getSDK() or query() threw — clean up and return error
+      sessions.delete(sessionId);
+      const errMsg = errorMessage(err);
+      log("START_ERROR", `session=${sessionId.slice(0, 8)} ${errMsg}`);
+      safeSend(getMainWindow,"claude:exit", {
+        code: 1, _sessionId: sessionId, error: errMsg,
+      });
+      return { sessionId, pid: 0, error: errMsg };
+    }
   });
 
   ipcMain.handle("claude:send", (_event, { sessionId, message }: { sessionId: string; message: { message: { content: unknown } } }) => {
@@ -502,6 +531,18 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
     } catch (err) {
       log("MCP_STATUS_ERR", `session=${sessionId.slice(0, 8)} ${errorMessage(err)}`);
       return { servers: [], error: errorMessage(err) };
+    }
+  });
+
+  ipcMain.handle("claude:supported-models", async (_event, sessionId: string) => {
+    const session = sessions.get(sessionId);
+    if (!session?.queryHandle?.supportedModels) return { models: [] };
+    try {
+      const models = await session.queryHandle.supportedModels();
+      return { models };
+    } catch (err) {
+      log("SUPPORTED_MODELS_ERR", `session=${sessionId.slice(0, 8)} ${errorMessage(err)}`);
+      return { models: [], error: errorMessage(err) };
     }
   });
 

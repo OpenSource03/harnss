@@ -110,15 +110,15 @@ export const ChatView = memo(function ChatView({ messages, extraBottomPadding, s
       <div className={`pt-14 ${extraBottomPadding ? "pb-56" : "pb-36"}`}>
         {messages.map((msg) => {
           if (msg.role === "tool_call") {
-            return <div key={msg.id} data-message-id={msg.id}><ToolCall message={msg} /></div>;
+            return <div key={msg.id} data-message-id={msg.id} className="message-item"><ToolCall message={msg} /></div>;
           }
           if (msg.role === "tool_result") return null;
           if (msg.role === "summary") {
-            return <div key={msg.id} data-message-id={msg.id}><SummaryBlock message={msg} /></div>;
+            return <div key={msg.id} data-message-id={msg.id} className="message-item"><SummaryBlock message={msg} /></div>;
           }
 
           return (
-            <div key={msg.id} data-message-id={msg.id}>
+            <div key={msg.id} data-message-id={msg.id} className="message-item">
               <MessageBubble
                 message={msg}
                 isContinuation={continuationIds.has(msg.id)}

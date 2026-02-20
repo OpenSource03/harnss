@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld("claude", {
     ipcRenderer.invoke("claude:permission_response", { sessionId, requestId, behavior, toolUseId, toolInput, newPermissionMode }),
   setPermissionMode: (sessionId: string, permissionMode: string) =>
     ipcRenderer.invoke("claude:set-permission-mode", { sessionId, permissionMode }),
+  supportedModels: (sessionId: string) => ipcRenderer.invoke("claude:supported-models", sessionId),
   mcpStatus: (sessionId: string) => ipcRenderer.invoke("claude:mcp-status", sessionId),
   mcpReconnect: (sessionId: string, serverName: string) =>
     ipcRenderer.invoke("claude:mcp-reconnect", { sessionId, serverName }),

@@ -13,6 +13,16 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-markdown": ["react-markdown", "remark-gfm"],
+          "vendor-syntax": ["react-syntax-highlighter"],
+          "vendor-xterm": ["@xterm/xterm", "@xterm/addon-fit"],
+          "vendor-diff": ["diff"],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

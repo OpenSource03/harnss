@@ -4,6 +4,7 @@ import type {
   SystemInitEvent,
   AssistantMessageEvent,
   ToolResultEvent,
+  ResultEvent,
   UIMessage,
   SessionInfo,
   SubagentToolStep,
@@ -45,6 +46,21 @@ export class BackgroundSessionStore {
 
   private nextId(prefix: string): string {
     return `${prefix}-${Date.now()}-${this.idCounter++}`;
+  }
+
+  private formatResultError(subtype: string, detail: string): string {
+    switch (subtype) {
+      case "error_max_turns":
+        return "Session reached the maximum number of turns. Start a new session to continue.";
+      case "error_max_budget_usd":
+        return "Session exceeded the cost budget limit.";
+      case "error_max_structured_output_retries":
+        return "Structured output failed after maximum retries.";
+      case "error_during_execution":
+        return detail || "An error occurred during execution.";
+      default:
+        return detail || "An unexpected error occurred.";
+    }
   }
 
   private getOrCreate(sessionId: string): InternalState {
@@ -191,9 +207,23 @@ export class BackgroundSessionStore {
       }
 
       case "result": {
+        const resultEvt = event as ResultEvent;
         state.isProcessing = false;
         this.onProcessingChange?.(sessionId, false);
-        state.totalCost += event.total_cost_usd ?? 0;
+        state.totalCost += resultEvt.total_cost_usd ?? 0;
+
+        // Surface SDK error results as system messages visible in chat
+        if (resultEvt.is_error || resultEvt.subtype?.startsWith("error")) {
+          const detail = resultEvt.errors?.join("; ") || resultEvt.result || "";
+          const errorMsg = this.formatResultError(resultEvt.subtype, detail);
+          state.messages.push({
+            id: this.nextId("sys-err"),
+            role: "system",
+            content: errorMsg,
+            isError: true,
+            timestamp: Date.now(),
+          });
+        }
         break;
       }
     }

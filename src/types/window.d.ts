@@ -3,7 +3,7 @@ import type {
   CCSessionInfo, PersistedSession, Project, UIMessage, Space,
   SearchMessageResult, SearchSessionResult,
   GitRepoInfo, GitStatus, GitBranch, GitLogEntry,
-  AgentDefinition, McpServerConfig, McpServerStatus,
+  AgentDefinition, ModelInfo, McpServerConfig, McpServerStatus,
 } from "./ui";
 import type { ACPSessionEvent, ACPPermissionEvent, ACPTurnCompleteEvent, ACPConfigOption } from "./acp";
 
@@ -27,13 +27,14 @@ declare global {
         permissionMode?: string;
         resume?: string;
         mcpServers?: McpServerConfig[];
-      }) => Promise<{ sessionId: string; pid: number }>;
+      }) => Promise<{ sessionId: string; pid: number; error?: string }>;
       send: (
         sessionId: string,
         message: { type: string; message: { role: string; content: string | Array<{ type: string; [key: string]: unknown }> } },
       ) => Promise<{ ok?: boolean; error?: string }>;
       stop: (sessionId: string) => Promise<{ ok: boolean }>;
       interrupt: (sessionId: string) => Promise<{ ok?: boolean; error?: string }>;
+      supportedModels: (sessionId: string) => Promise<{ models: ModelInfo[]; error?: string }>;
       mcpStatus: (sessionId: string) => Promise<{ servers: McpServerStatus[]; error?: string }>;
       mcpReconnect: (sessionId: string, serverName: string) => Promise<{ ok?: boolean; error?: string; restarted?: boolean }>;
       restartSession: (sessionId: string, mcpServers?: McpServerConfig[]) => Promise<{ ok?: boolean; error?: string; restarted?: boolean }>;
@@ -46,7 +47,7 @@ declare global {
       log: (label: string, data: unknown) => void;
       onEvent: (callback: (event: ClaudeEvent & { _sessionId: string }) => void) => () => void;
       onStderr: (callback: (data: { data: string; _sessionId: string }) => void) => () => void;
-      onExit: (callback: (data: { code: number | null; _sessionId: string }) => void) => () => void;
+      onExit: (callback: (data: { code: number | null; _sessionId: string; error?: string }) => void) => () => void;
       onPermissionRequest: (
         callback: (data: {
           _sessionId: string;
@@ -161,7 +162,7 @@ declare global {
         onEvent: (callback: (data: ACPSessionEvent) => void) => () => void;
         onPermissionRequest: (callback: (data: ACPPermissionEvent) => void) => () => void;
         onTurnComplete: (callback: (data: ACPTurnCompleteEvent) => void) => () => void;
-        onExit: (callback: (data: { _sessionId: string; code: number | null }) => void) => () => void;
+        onExit: (callback: (data: { _sessionId: string; code: number | null; error?: string }) => void) => () => void;
       };
       mcp: {
         list: (projectId: string) => Promise<McpServerConfig[]>;

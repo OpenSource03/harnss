@@ -102,12 +102,22 @@ export function useSessionManager(projects: Project[]) {
     const project = projectsRef.current.find((p) => p.id === projectId);
     if (!project) return;
     const mcpServers = await window.claude.mcp.list(projectId);
-    const result = await window.claude.start({
-      cwd: project.path,
-      model: options?.model,
-      permissionMode: options?.permissionMode,
-      mcpServers,
-    });
+    let result;
+    try {
+      result = await window.claude.start({
+        cwd: project.path,
+        model: options?.model,
+        permissionMode: options?.permissionMode,
+        mcpServers,
+      });
+    } catch (err) {
+      console.warn("[eagerStartSession] start() failed:", err);
+      return; // Eager start is optional — will fall back to normal start in materializeDraft
+    }
+    if (result.error) {
+      console.warn("[eagerStartSession] start() returned error:", result.error);
+      return;
+    }
     // Only commit if still in draft for the same project
     if (activeSessionIdRef.current === DRAFT_ID && draftProjectIdRef.current === projectId) {
       liveSessionIdsRef.current.add(result.sessionId);
@@ -570,12 +580,25 @@ export function useSessionManager(projects: Project[]) {
           }
         } else {
           // Fallback: start normally (eager start failed or was cleaned up)
-          const result = await window.claude.start({
-            cwd: project.path,
-            model: options.model,
-            permissionMode: options.permissionMode,
-            mcpServers,
-          });
+          let result;
+          try {
+            result = await window.claude.start({
+              cwd: project.path,
+              model: options.model,
+              permissionMode: options.permissionMode,
+              mcpServers,
+            });
+          } catch (err) {
+            console.error("[materializeDraft] start() failed:", err);
+            materializingRef.current = false;
+            return "";
+          }
+          if (result.error) {
+            // The exit event handler in useClaude will show the error message
+            console.error("[materializeDraft] start() returned error:", result.error);
+            materializingRef.current = false;
+            return "";
+          }
           sessionId = result.sessionId;
         }
       }
@@ -922,7 +945,35 @@ export function useSessionManager(projects: Project[]) {
         resume: oldId, // Resume the SDK session to restore conversation context
       };
 
-      const result = await window.claude.start(startPayload);
+      let result;
+      try {
+        result = await window.claude.start(startPayload);
+      } catch (err) {
+        engine.setMessages((prev) => [
+          ...prev,
+          {
+            id: `system-revive-error-${Date.now()}`,
+            role: "system" as const,
+            content: `Failed to resume session: ${err instanceof Error ? err.message : String(err)}`,
+            isError: true,
+            timestamp: Date.now(),
+          },
+        ]);
+        return;
+      }
+      if (result.error) {
+        engine.setMessages((prev) => [
+          ...prev,
+          {
+            id: `system-revive-error-${Date.now()}`,
+            role: "system" as const,
+            content: result.error!,
+            isError: true,
+            timestamp: Date.now(),
+          },
+        ]);
+        return;
+      }
       const newSessionId = result.sessionId;
 
       if (newSessionId !== oldId) {
@@ -1185,6 +1236,7 @@ export function useSessionManager(projects: Project[]) {
             }
           })
         : claude.reconnectMcpServer,
+    supportedModels: claude.supportedModels,
     restartWithMcpServers: isACP
       ? isDraft
         ? async (servers: McpServerConfig[]) => {

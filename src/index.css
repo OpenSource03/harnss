@@ -166,6 +166,17 @@ html.glass-enabled #root {
     ) border-box;
 }
 
+/* Skip layout/paint for off-screen messages — large chats render instantly */
+.message-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px; /* estimated height to prevent scroll jumps */
+}
+
+/* Pre-promote islands to GPU compositing layer — avoids first-interaction shader stutter */
+.island {
+  will-change: transform;
+}
+
 /* Frameless window: draggable title bar regions */
 .drag-region {
   -webkit-app-region: drag;

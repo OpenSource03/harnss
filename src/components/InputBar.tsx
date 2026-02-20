@@ -22,6 +22,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -29,10 +30,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { ImageAttachment, ContextUsage, AgentDefinition, ACPConfigOption } from "@/types";
+import type { ImageAttachment, ContextUsage, AgentDefinition, ACPConfigOption, ModelInfo } from "@/types";
 import { flattenConfigOptions } from "@/types/acp";
 
-const MODELS = [
+const FALLBACK_MODELS = [
   { id: "claude-opus-4-6", label: "Opus 4.6" },
   { id: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
@@ -107,6 +108,9 @@ interface InputBarProps {
   onAgentChange?: (agent: AgentDefinition | null) => void;
   acpConfigOptions?: ACPConfigOption[];
   onACPConfigChange?: (configId: string, value: string) => void;
+  supportedModels?: ModelInfo[];
+  /** Non-null when session is active (not draft) — engine is locked and cross-engine agents show "Opens new chat" */
+  lockedEngine?: "claude" | "acp" | null;
 }
 
 // Simple fuzzy match: all query chars must appear in order
@@ -170,6 +174,8 @@ export const InputBar = memo(function InputBar({
   onAgentChange,
   acpConfigOptions,
   onACPConfigChange,
+  supportedModels,
+  lockedEngine,
 }: InputBarProps) {
   const [hasContent, setHasContent] = useState(false);
   const [showMentions, setShowMentions] = useState(false);
@@ -187,7 +193,11 @@ export const InputBar = memo(function InputBar({
   const mentionStartOffset = useRef<number>(0);
   const fileCachePathRef = useRef<string | undefined>(undefined);
 
-  const selectedModel = MODELS.find((m) => m.id === model) ?? MODELS[0];
+  // Use dynamic models from SDK when available, fall back to hardcoded list
+  const modelList = supportedModels?.length
+    ? supportedModels.map((m) => ({ id: m.value, label: m.displayName, description: m.description }))
+    : FALLBACK_MODELS.map((m) => ({ id: m.id, label: m.label, description: undefined as string | undefined }));
+  const selectedModel = modelList.find((m) => m.id === model) ?? modelList[0];
   const selectedMode =
     PERMISSION_MODES.find((m) => m.id === permissionMode) ?? PERMISSION_MODES[0];
   const isACPAgent = selectedAgent != null && selectedAgent.engine === "acp";
@@ -638,20 +648,46 @@ export const InputBar = memo(function InputBar({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
-                {agents.map((agent) => (
-                  <DropdownMenuItem
-                    key={agent.id}
-                    onClick={() => onAgentChange(agent.engine === "claude" ? null : agent)}
-                    className={
-                      (selectedAgent?.id ?? "claude-code") === agent.id ? "bg-accent" : ""
-                    }
-                  >
-                    {agent.name}
-                    {agent.engine === "acp" && (
-                      <span className="ms-1.5 text-[10px] text-muted-foreground">ACP</span>
-                    )}
-                  </DropdownMenuItem>
-                ))}
+                {(() => {
+                  const isCrossEngine = (agent: AgentDefinition) =>
+                    lockedEngine != null && agent.engine !== lockedEngine;
+                  const sameEngine = agents.filter((a) => !isCrossEngine(a));
+                  const crossEngine = agents.filter((a) => isCrossEngine(a));
+
+                  const renderItem = (agent: AgentDefinition, crossEngine: boolean) => (
+                    <DropdownMenuItem
+                      key={agent.id}
+                      onClick={() => onAgentChange(agent.engine === "claude" ? null : agent)}
+                      className={
+                        (selectedAgent?.id ?? "claude-code") === agent.id ? "bg-accent" : ""
+                      }
+                    >
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          {agent.name}
+                          {agent.engine === "acp" && (
+                            <span className="text-[10px] text-muted-foreground">ACP</span>
+                          )}
+                        </div>
+                        {crossEngine && (
+                          <div className="text-[10px] text-muted-foreground/70">
+                            Opens new chat
+                          </div>
+                        )}
+                      </div>
+                    </DropdownMenuItem>
+                  );
+
+                  return (
+                    <>
+                      {sameEngine.map((a) => renderItem(a, false))}
+                      {crossEngine.length > 0 && sameEngine.length > 0 && (
+                        <DropdownMenuSeparator />
+                      )}
+                      {crossEngine.map((a) => renderItem(a, true))}
+                    </>
+                  );
+                })()}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -703,13 +739,18 @@ export const InputBar = memo(function InputBar({
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
-                  {MODELS.map((m) => (
+                  {modelList.map((m) => (
                     <DropdownMenuItem
                       key={m.id}
                       onClick={() => onModelChange(m.id)}
                       className={m.id === model ? "bg-accent" : ""}
                     >
-                      {m.label}
+                      <div>
+                        <div>{m.label}</div>
+                        {m.description && (
+                          <div className="text-[10px] text-muted-foreground">{m.description}</div>
+                        )}
+                      </div>
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>

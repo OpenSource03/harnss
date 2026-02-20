@@ -141,7 +141,13 @@ export interface ModelUsageEntry {
 
 export interface ResultEvent {
   type: "result";
-  subtype: "success" | "error";
+  subtype:
+    | "success"
+    | "error"
+    | "error_during_execution"
+    | "error_max_turns"
+    | "error_max_budget_usd"
+    | "error_max_structured_output_retries";
   is_error: boolean;
   duration_ms: number;
   num_turns: number;
@@ -149,6 +155,8 @@ export interface ResultEvent {
   total_cost_usd: number;
   session_id: string;
   modelUsage?: Record<string, ModelUsageEntry>;
+  /** Error details from SDK — only present on error result subtypes */
+  errors?: string[];
 }
 
 export interface SystemStatusEvent {

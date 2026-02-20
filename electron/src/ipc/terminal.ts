@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from "electron";
 import crypto from "crypto";
 import { log } from "../lib/logger";
+import { safeSend } from "../lib/safe-send";
 
 interface TerminalEntry {
   pty: {
@@ -44,13 +45,13 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
       terminals.set(terminalId, { pty: ptyProcess, cols: cols || 80, rows: rows || 24 });
 
       ptyProcess.onData((data: string) => {
-        getMainWindow()?.webContents.send("terminal:data", { terminalId, data });
+        safeSend(getMainWindow, "terminal:data", { terminalId, data });
       });
 
       ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
         log("TERMINAL", `Terminal ${terminalId.slice(0, 8)} exited with code ${exitCode}`);
         terminals.delete(terminalId);
-        getMainWindow()?.webContents.send("terminal:exit", { terminalId, exitCode });
+        safeSend(getMainWindow, "terminal:exit", { terminalId, exitCode });
       });
 
       log("TERMINAL", `Created terminal ${terminalId.slice(0, 8)} shell=${shellPath} cwd=${cwd}`);

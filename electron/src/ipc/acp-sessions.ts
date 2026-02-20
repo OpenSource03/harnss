@@ -3,6 +3,7 @@ import { spawn, ChildProcess } from "child_process";
 import { Readable, Writable } from "stream";
 import crypto from "crypto";
 import { log } from "../lib/logger";
+import { safeSend } from "../lib/safe-send";
 import { getAgent } from "../lib/agent-registry";
 import { getMcpAuthHeaders } from "../lib/mcp-oauth-flow";
 
@@ -133,6 +134,15 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
 
       proc.on("error", (err) => {
         log("ACP_SPAWN", `ERROR: spawn failed: ${err.message}`);
+        // Notify renderer so user isn't stuck with infinite spinner.
+        // The "exit" event may not fire for ENOENT errors.
+        safeSend(getMainWindow,"acp:exit", {
+          _sessionId: internalId,
+          code: 1,
+          error: `Failed to start agent: ${err.message}`,
+        });
+        acpSessions.delete(internalId);
+        configBuffer.delete(internalId);
       });
 
       proc.stderr?.on("data", (chunk: Buffer) => {
@@ -140,16 +150,16 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
       });
 
       proc.on("exit", (code) => {
-        const entry = acpSessions.get(internalId);
-        log("ACP_EXIT", `session=${internalId.slice(0, 8)} code=${code} total_events=${entry?.eventCounter ?? 0}`);
+        // Guard: session may already be deleted by the "error" handler (ENOENT race)
+        if (!acpSessions.has(internalId)) return;
+        const entry = acpSessions.get(internalId)!;
+        log("ACP_EXIT", `session=${internalId.slice(0, 8)} code=${code} total_events=${entry.eventCounter}`);
         // Resolve any pending permissions so the SDK doesn't hang
-        if (entry) {
-          for (const [, resolver] of entry.pendingPermissions) {
-            resolver.resolve({ outcome: { outcome: "cancelled" } });
-          }
-          entry.pendingPermissions.clear();
+        for (const [, resolver] of entry.pendingPermissions) {
+          resolver.resolve({ outcome: { outcome: "cancelled" } });
         }
-        getMainWindow()?.webContents.send("acp:exit", {
+        entry.pendingPermissions.clear();
+        safeSend(getMainWindow,"acp:exit", {
           _sessionId: internalId,
           code,
         });
@@ -191,7 +201,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
           // the full conversation — forwarding would cause duplicate messages.
           if (entry?.isReloading) return;
 
-          getMainWindow()?.webContents.send("acp:event", {
+          safeSend(getMainWindow,"acp:event", {
             _sessionId: internalId,
             sessionId: (params as { sessionId: string }).sessionId,
             update,
@@ -214,7 +224,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
               optionCount: Array.isArray(options) ? options.length : 0,
             });
 
-            getMainWindow()?.webContents.send("acp:permission_request", {
+            safeSend(getMainWindow,"acp:permission_request", {
               _sessionId: internalId,
               requestId,
               sessionId: (params as { sessionId: string }).sessionId,
@@ -371,18 +381,27 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
       });
       reviveProc = proc;
 
-      proc.on("error", (err) => log("ACP_REVIVE", `ERROR: spawn failed: ${err.message}`));
+      proc.on("error", (err) => {
+        log("ACP_REVIVE", `ERROR: spawn failed: ${err.message}`);
+        safeSend(getMainWindow,"acp:exit", {
+          _sessionId: internalId,
+          code: 1,
+          error: `Failed to start agent: ${err.message}`,
+        });
+        acpSessions.delete(internalId);
+        configBuffer.delete(internalId);
+      });
       proc.stderr?.on("data", (chunk: Buffer) => log("ACP_STDERR", `session=${internalId.slice(0, 8)} ${chunk.toString().trim()}`));
       proc.on("exit", (code) => {
-        const entry = acpSessions.get(internalId);
+        // Guard: session may already be deleted by the "error" handler (ENOENT race)
+        if (!acpSessions.has(internalId)) return;
+        const entry = acpSessions.get(internalId)!;
         log("ACP_EXIT", `session=${internalId.slice(0, 8)} code=${code}`);
-        if (entry) {
-          for (const [, resolver] of entry.pendingPermissions) {
-            resolver.resolve({ outcome: { outcome: "cancelled" } });
-          }
-          entry.pendingPermissions.clear();
+        for (const [, resolver] of entry.pendingPermissions) {
+          resolver.resolve({ outcome: { outcome: "cancelled" } });
         }
-        getMainWindow()?.webContents.send("acp:exit", { _sessionId: internalId, code });
+        entry.pendingPermissions.clear();
+        safeSend(getMainWindow,"acp:exit", { _sessionId: internalId, code });
         acpSessions.delete(internalId);
         configBuffer.delete(internalId);
       });
@@ -398,7 +417,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
           if (entry) entry.eventCounter++;
           const update = (params as { update: Record<string, unknown> }).update;
           if (entry?.isReloading) return; // suppress history replay
-          getMainWindow()?.webContents.send("acp:event", {
+          safeSend(getMainWindow,"acp:event", {
             _sessionId: internalId,
             sessionId: (params as { sessionId: string }).sessionId,
             update,
@@ -410,7 +429,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
             const toolCall = (params as { toolCall: Record<string, unknown> }).toolCall;
             const opts = (params as { options: unknown[] }).options;
             pendingPermissions.set(requestId, { resolve });
-            getMainWindow()?.webContents.send("acp:permission_request", {
+            safeSend(getMainWindow,"acp:permission_request", {
               _sessionId: internalId, requestId,
               sessionId: (params as { sessionId: string }).sessionId,
               toolCall, options: opts,
@@ -523,7 +542,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
 
       log("ACP_TURN_COMPLETE", `session=${sessionId.slice(0, 8)} stopReason=${result.stopReason} usage=${JSON.stringify(result.usage ?? null)}`);
 
-      getMainWindow()?.webContents.send("acp:turn_complete", {
+      safeSend(getMainWindow,"acp:turn_complete", {
         _sessionId: sessionId,
         stopReason: result.stopReason,
         usage: result.usage,

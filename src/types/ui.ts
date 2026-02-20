@@ -73,6 +73,8 @@ export interface UIMessage {
   images?: ImageAttachment[];
   compactTrigger?: "manual" | "auto";
   compactPreTokens?: number;
+  /** When true, system message is rendered with error styling (red text, alert icon) */
+  isError?: boolean;
 }
 
 export interface SessionInfo {
@@ -177,6 +179,14 @@ export interface AgentDefinition {
   env?: Record<string, string>;
   icon?: string;
   builtIn?: boolean;
+}
+
+// ── Model types ──
+
+export interface ModelInfo {
+  value: string;
+  displayName: string;
+  description: string;
 }
 
 // ── MCP types ──

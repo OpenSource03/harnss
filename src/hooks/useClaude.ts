@@ -13,6 +13,7 @@ import type {
   PermissionRequest,
   ImageAttachment,
   ContextUsage,
+  ModelInfo,
   McpServerStatus,
   McpServerConfig,
 } from "../types";
@@ -33,6 +34,22 @@ function uiLog(label: string, data: unknown) {
 let idCounter = 0;
 function nextId(prefix: string): string {
   return `${prefix}-${Date.now()}-${idCounter++}`;
+}
+
+/** Convert SDK result error subtypes to user-friendly messages */
+function formatResultError(subtype: string, detail: string): string {
+  switch (subtype) {
+    case "error_max_turns":
+      return "Session reached the maximum number of turns. Start a new session to continue.";
+    case "error_max_budget_usd":
+      return "Session exceeded the cost budget limit.";
+    case "error_max_structured_output_retries":
+      return "Structured output failed after maximum retries.";
+    case "error_during_execution":
+      return detail || "An error occurred during execution.";
+    default:
+      return detail || "An unexpected error occurred.";
+  }
 }
 
 // Maps a parent_tool_use_id (Task tool_use_id) → the tool_call message id
@@ -61,6 +78,7 @@ export function useClaude({ sessionId, initialMessages, initialMeta }: UseClaude
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [isCompacting, setIsCompacting] = useState(false);
   const [mcpServerStatuses, setMcpServerStatuses] = useState<McpServerStatus[]>([]);
+  const [supportedModels, setSupportedModels] = useState<ModelInfo[]>([]);
 
   const buffer = useRef(new StreamingBuffer());
   const parentToolMap = useRef<ParentToolMap>(new Map());
@@ -265,6 +283,18 @@ export function useClaude({ sessionId, initialMessages, initialMeta }: UseClaude
               }, 3000);
             }
           }
+          // Fetch available models from the SDK
+          {
+            const modelsSid = sessionIdRef.current;
+            if (modelsSid) {
+              window.claude.supportedModels(modelsSid).then((result) => {
+                if (result.models?.length) {
+                  setSupportedModels(result.models);
+                }
+              }).catch(() => { /* session may have been stopped */ });
+            }
+          }
+
           setIsConnected(true);
           setIsProcessing(true);
           break;
@@ -551,8 +581,25 @@ export function useClaude({ sessionId, initialMessages, initialMeta }: UseClaude
           setIsProcessing(false);
           setTotalCost((prev) => prev + (event.total_cost_usd ?? 0));
 
-          // Extract contextWindow from modelUsage if available
+          // Surface SDK error results to the user
           const resultEvent = event as ResultEvent;
+          if (resultEvent.is_error || resultEvent.subtype?.startsWith("error")) {
+            const errorMsg = resultEvent.errors?.join("\n")
+              || resultEvent.result
+              || "An error occurred";
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: nextId("system-result-error"),
+                role: "system",
+                content: formatResultError(resultEvent.subtype, errorMsg),
+                isError: true,
+                timestamp: Date.now(),
+              },
+            ]);
+          }
+
+          // Extract contextWindow from modelUsage if available
           if (resultEvent.modelUsage) {
             const entries = Object.values(resultEvent.modelUsage);
             const primaryEntry = entries.find((e) => e.contextWindow > 0);
@@ -570,6 +617,19 @@ export function useClaude({ sessionId, initialMessages, initialMeta }: UseClaude
         case "auth_status": {
           const authEvt = event as AuthStatusEvent;
           uiLog("AUTH_STATUS", { isAuthenticating: authEvt.isAuthenticating, error: authEvt.error, output: authEvt.output?.length ?? 0 });
+          // Surface auth errors to user
+          if (authEvt.error) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: nextId("system-auth-error"),
+                role: "system",
+                content: `Authentication error: ${authEvt.error}`,
+                isError: true,
+                timestamp: Date.now(),
+              },
+            ]);
+          }
           // After auth completes, refresh MCP server statuses
           if (!authEvt.isAuthenticating && sessionIdRef.current) {
             window.claude.mcpStatus(sessionIdRef.current).then((result) => {
@@ -695,12 +755,14 @@ export function useClaude({ sessionId, initialMessages, initialMeta }: UseClaude
       setIsCompacting(false);
       setPendingPermission(null);
       if (data.code !== 0 && data.code !== null) {
+        const errorDetail = data.error || `Process exited with code ${data.code}`;
         setMessages((prev) => [
           ...prev,
           {
             id: nextId("system-exit"),
             role: "system",
-            content: `Process exited with code ${data.code}`,
+            content: errorDetail,
+            isError: true,
             timestamp: Date.now(),
           },
         ]);
@@ -785,5 +847,6 @@ export function useClaude({ sessionId, initialMessages, initialMeta }: UseClaude
     refreshMcpStatus,
     reconnectMcpServer,
     restartWithMcpServers,
+    supportedModels,
   };
 }

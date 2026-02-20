@@ -1,0 +1,42 @@
+import { BrowserWindow } from "electron";
+import { log } from "./logger";
+
+interface MicaBrowserWindowClass {
+  new (options: Electron.BrowserWindowConstructorOptions): MicaWindow;
+}
+
+export interface MicaWindow extends BrowserWindow {
+  setDarkTheme(): void;
+  setLightTheme(): void;
+  setAutoTheme(): void;
+  setMicaEffect(): void;
+  setMicaTabbedEffect(): void;
+  setMicaAcrylicEffect(): void;
+  setAcrylic(): void;
+  setBlur(): void;
+  setTransparent(): void;
+  setRoundedCorner(): void;
+  setSmallRoundedCorner(): void;
+  setSquareCorner(): void;
+  setBorderColor(color: string | null): void;
+  setCaptionColor(color: string | null): void;
+  setTitleTextColor(color: string | null): void;
+}
+
+let MicaBrowserWindow: MicaBrowserWindowClass | null = null;
+let isWindows11 = false;
+
+if (process.platform === "win32") {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require("mica-electron");
+    MicaBrowserWindow = mod.MicaBrowserWindow;
+    isWindows11 = !!mod.IS_WINDOWS_11;
+    log("MICA", `mica-electron loaded (Windows 11: ${isWindows11})`);
+  } catch (err) {
+    log("MICA", `Failed to load mica-electron: ${(err as Error).message}`);
+  }
+}
+
+export const micaEnabled = !!(MicaBrowserWindow && process.platform === "win32");
+export { MicaBrowserWindow, isWindows11 };

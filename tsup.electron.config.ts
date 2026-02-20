@@ -15,6 +15,7 @@ export default defineConfig({
     "electron",
     "node-pty",
     "electron-liquid-glass",
+    "mica-electron",
     "@anthropic-ai/claude-agent-sdk",
     "electron-updater",
   ],
