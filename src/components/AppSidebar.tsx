@@ -538,7 +538,13 @@ function SessionItem({
             : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50"
         }`}
       >
-        {session.isProcessing ? (
+        {session.hasPendingPermission ? (
+          /* Pulsing amber dot — permission waiting (takes priority over spinner since it's blocking) */
+          <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400/60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+          </span>
+        ) : session.isProcessing ? (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin text-sidebar-foreground/50" />
         ) : (
           <MessageSquare className="h-3 w-3 shrink-0 text-sidebar-foreground/40" />

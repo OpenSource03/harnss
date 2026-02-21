@@ -13,6 +13,10 @@ interface UseACPOptions {
     sessionInfo: SessionInfo | null;
     totalCost: number;
   } | null;
+  /** Restore a pending permission when switching back to this session */
+  initialPermission?: PermissionRequest | null;
+  /** Restore the raw ACP permission event (needed for optionId lookup) */
+  initialRawAcpPermission?: ACPPermissionEvent | null;
 }
 
 /** Renderer-side ACP log — forwarded to main process log file as [ACP_UI:TAG] */
@@ -25,7 +29,7 @@ function nextAcpId(prefix: string): string {
   return `${prefix}-${Date.now()}-${acpIdCounter++}`;
 }
 
-export function useACP({ sessionId, initialMessages, initialConfigOptions, initialMeta }: UseACPOptions) {
+export function useACP({ sessionId, initialMessages, initialConfigOptions, initialMeta, initialPermission, initialRawAcpPermission }: UseACPOptions) {
   const [messages, setMessages] = useState<UIMessage[]>(initialMessages ?? []);
   const [isProcessing, setIsProcessing] = useState(initialMeta?.isProcessing ?? false);
   const [isConnected, setIsConnected] = useState(initialMeta?.isConnected ?? false);
@@ -58,10 +62,11 @@ export function useACP({ sessionId, initialMessages, initialConfigOptions, initi
     setIsConnected(initialMeta?.isConnected ?? false);
     setSessionInfo(initialMeta?.sessionInfo ?? null);
     setTotalCost(initialMeta?.totalCost ?? 0);
-    setPendingPermission(null);
+    // Restore pending permission from background store (or clear if none)
+    setPendingPermission(initialPermission ?? null);
+    acpPermissionRef.current = initialRawAcpPermission ?? null;
     setContextUsage(null);
     setConfigOptions(initialConfigOptions ?? []);
-    acpPermissionRef.current = null;
     buffer.current.reset();
     cancelAnimationFrame(rafId.current);
     pendingFlush.current = false;

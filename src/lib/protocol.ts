@@ -8,7 +8,8 @@ export function normalizeToolResult(
   toolUseResult: ToolUseResult | string | undefined,
   rawContent: string | Array<{ type: string; text: string }>,
 ): ToolUseResult {
-  if (toolUseResult && typeof toolUseResult !== "string") return toolUseResult;
+  // Return structured result if it has actual fields (skip empty {} from SDK)
+  if (toolUseResult && typeof toolUseResult !== "string" && Object.keys(toolUseResult).length > 0) return toolUseResult;
   const contentStr = typeof rawContent === "string"
     ? rawContent
     : Array.isArray(rawContent)

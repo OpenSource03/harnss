@@ -104,6 +104,8 @@ export interface ChatSession {
   totalCost: number;
   isActive: boolean;
   isProcessing?: boolean;
+  /** A background session has a pending permission request (tool approval, etc.) */
+  hasPendingPermission?: boolean;
   titleGenerating?: boolean;
   engine?: "claude" | "acp";
   agentSessionId?: string;

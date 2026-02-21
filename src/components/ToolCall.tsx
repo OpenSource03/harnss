@@ -14,6 +14,8 @@ import {
   CheckCircle2,
   Loader2,
   AlertCircle,
+  ExternalLink,
+  ChevronsUpDown,
 } from "lucide-react";
 import {
   Collapsible,
@@ -25,6 +27,7 @@ import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UIMessage, SubagentToolStep, TodoItem } from "@/types";
+import { getLanguageFromPath, INLINE_HIGHLIGHT_STYLE, INLINE_CODE_TAG_STYLE } from "@/lib/languages";
 import { DiffViewer } from "./DiffViewer";
 import { OpenInEditorButton } from "./OpenInEditorButton";
 import { McpToolContent, hasMcpRenderer, getMcpCompactSummary } from "./McpToolContent";
@@ -33,10 +36,10 @@ import { McpToolContent, hasMcpRenderer, getMcpCompactSummary } from "./McpToolC
 
 const WRITE_SYNTAX_STYLE: React.CSSProperties = {
   margin: 0,
-  borderRadius: "6px",
+  borderRadius: 0, // container's .island handles border-radius + glass border
   fontSize: "11px",
   padding: "10px 12px",
-  background: "rgba(255,255,255,0.04)",
+  background: "transparent", // transparent so .island gradient border shows through
 };
 
 const WRITE_LINE_NUMBER_STYLE: React.CSSProperties = {
@@ -131,22 +134,6 @@ function getMcpToolLabel(toolName: string, type: "past" | "active"): string | nu
     return type === "past" ? `Called ${server}` : `Calling ${server}`;
   }
   return null;
-}
-
-function getLanguageFromPath(filePath: string): string {
-  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
-  const map: Record<string, string> = {
-    ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx",
-    py: "python", rs: "rust", go: "go", java: "java", kt: "kotlin",
-    css: "css", scss: "scss", html: "html", json: "json",
-    md: "markdown", yaml: "yaml", yml: "yaml",
-    sh: "bash", bash: "bash", zsh: "bash",
-    sql: "sql", graphql: "graphql", xml: "xml",
-    toml: "toml", ini: "ini",
-    c: "c", cpp: "cpp", h: "c", hpp: "cpp",
-    rb: "ruby", php: "php", swift: "swift",
-  };
-  return map[ext] ?? "text";
 }
 
 // ── Main entry ──
@@ -244,6 +231,10 @@ function ExpandedToolContent({ message }: { message: UIMessage }) {
       return <SearchContent message={message} />;
     case "TodoWrite":
       return <TodoWriteContent message={message} />;
+    case "WebSearch":
+      return <WebSearchContent message={message} />;
+    case "WebFetch":
+      return <WebFetchContent message={message} />;
     default:
       // Check for specialized MCP tool renderers
       if (message.toolName && hasMcpRenderer(message.toolName)) {
@@ -263,9 +254,18 @@ function BashContent({ message }: { message: UIMessage }) {
   return (
     <div className="space-y-1.5 text-xs">
       {!!command && (
-        <div className="rounded-md bg-foreground/[0.04] px-3 py-2 font-mono text-[11px] text-foreground/90 whitespace-pre-wrap wrap-break-word">
+        <div className="rounded-md bg-foreground/[0.04] px-3 py-2 font-mono text-[11px] whitespace-pre-wrap wrap-break-word">
           <span className="text-foreground/40 select-none">$ </span>
-          {String(command)}
+          <SyntaxHighlighter
+            language="bash"
+            style={oneDark}
+            customStyle={INLINE_HIGHLIGHT_STYLE}
+            codeTagProps={{ style: INLINE_CODE_TAG_STYLE }}
+            PreTag="span"
+            CodeTag="span"
+          >
+            {String(command)}
+          </SyntaxHighlighter>
         </div>
       )}
       {result && (
@@ -286,16 +286,14 @@ function WriteContent({ message }: { message: UIMessage }) {
 
   if (!content) return <GenericContent message={message} />;
 
-  const truncated = content.length > 3000;
-  const displayContent = truncated ? content.slice(0, 3000) : content;
-
   return (
     <div className="space-y-1.5 text-xs">
       <div className="group/write flex items-center gap-1.5 text-foreground/50 font-mono text-[11px]">
         {filePath.split("/").pop()}
         <OpenInEditorButton filePath={filePath} className="group-hover/write:text-foreground/25" />
       </div>
-      <div className="max-h-64 overflow-auto rounded-md overflow-hidden">
+      {/* island gives the code block a diagonal-reflection glass border; overflow-y-auto enables full-file scrolling */}
+      <div className="island max-h-[32rem] overflow-y-auto rounded-lg bg-background">
         <SyntaxHighlighter
           language={language}
           style={oneDark}
@@ -304,12 +302,9 @@ function WriteContent({ message }: { message: UIMessage }) {
           lineNumberStyle={WRITE_LINE_NUMBER_STYLE}
           wrapLongLines
         >
-          {displayContent}
+          {content}
         </SyntaxHighlighter>
       </div>
-      {truncated && (
-        <p className="text-[10px] text-foreground/30 italic">Content truncated</p>
-      )}
     </div>
   );
 }
@@ -371,6 +366,131 @@ function SearchContent({ message }: { message: UIMessage }) {
         <pre className="max-h-48 overflow-auto rounded-md bg-foreground/[0.04] px-3 py-2 text-[11px] text-foreground/50 whitespace-pre-wrap wrap-break-word">
           {formatResult(result)}
         </pre>
+      )}
+    </div>
+  );
+}
+
+// ── Shared helper: extract text from toolResult (stdout → string content → array content) ──
+
+function extractResultText(result: UIMessage["toolResult"]): string {
+  if (!result) return "";
+  if (result.stdout) return result.stdout;
+  if (typeof result.content === "string") return result.content;
+  if (Array.isArray(result.content)) {
+    return result.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
+  }
+  return "";
+}
+
+// ── WebSearch: clean link list + summary ──
+
+/** Parse the `Links: [{title, url}...]` JSON embedded in WebSearch stdout */
+function parseSearchLinks(text: string): Array<{ title: string; url: string }> {
+  const match = text.match(/Links:\s*(\[[\s\S]*?\])\n/);
+  if (!match) return [];
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return [];
+  }
+}
+
+const MAX_VISIBLE_LINKS = 8;
+
+function WebSearchContent({ message }: { message: UIMessage }) {
+  const resultText = extractResultText(message.toolResult);
+  const query = String(message.toolInput?.query ?? "");
+  const links = parseSearchLinks(resultText);
+
+  // Extract the markdown summary after the Links block
+  const summaryMatch = resultText.match(/\n\n([\s\S]+)$/);
+  const summary = summaryMatch?.[1]?.trim() ?? "";
+  const visibleLinks = links.slice(0, MAX_VISIBLE_LINKS);
+  const overflow = links.length - MAX_VISIBLE_LINKS;
+
+  return (
+    <div className="space-y-2 text-xs">
+      {query && (
+        <div className="font-mono text-[11px] text-foreground/50">
+          &quot;{query}&quot;
+        </div>
+      )}
+
+      {visibleLinks.length > 0 && (
+        <div className="rounded-md border border-foreground/[0.06] overflow-hidden">
+          {visibleLinks.map((link, i) => {
+            let domain = "";
+            try { domain = new URL(link.url).hostname.replace(/^www\./, ""); } catch { /* ignore */ }
+            return (
+              <a
+                key={i}
+                href={link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`flex items-center gap-2 px-3 py-1.5 hover:bg-foreground/[0.04] transition-colors group/link ${
+                  i > 0 ? "border-t border-foreground/[0.06]" : ""
+                }`}
+              >
+                <ExternalLink className="h-3 w-3 shrink-0 text-foreground/20 group-hover/link:text-foreground/40 transition-colors" />
+                <span className="shrink-0 text-[11px] text-foreground/30 w-[120px] truncate">{domain}</span>
+                <span className="truncate text-foreground/60 group-hover/link:text-foreground/80 transition-colors">{link.title}</span>
+              </a>
+            );
+          })}
+          {overflow > 0 && (
+            <div className="border-t border-foreground/[0.06] px-3 py-1 text-[11px] text-foreground/30">
+              +{overflow} more result{overflow !== 1 ? "s" : ""}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Markdown summary from the search */}
+      {summary && (
+        <div className="max-h-64 overflow-auto rounded-md bg-foreground/[0.03] px-3 py-2">
+          <div className="prose prose-invert prose-sm max-w-none text-foreground/60 text-[12px]">
+            <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{summary.slice(0, 3000)}</ReactMarkdown>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── WebFetch: source URL + rendered content ──
+
+function WebFetchContent({ message }: { message: UIMessage }) {
+  const content = extractResultText(message.toolResult);
+  const url = String(message.toolInput?.url ?? "");
+  let domain = "";
+  try { domain = new URL(url).hostname.replace(/^www\./, ""); } catch { /* ignore */ }
+  const truncated = content.length > 3000;
+  const displayContent = truncated ? content.slice(0, 3000) : content;
+
+  return (
+    <div className="space-y-2 text-xs">
+      {url && (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-[11px] text-foreground/50 hover:text-foreground/70 transition-colors font-mono"
+        >
+          <Globe className="h-3 w-3 shrink-0" />
+          {domain || url}
+          <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-50" />
+        </a>
+      )}
+      {displayContent && (
+        <div className="max-h-64 overflow-auto rounded-md bg-foreground/[0.03] px-3 py-2">
+          <div className="prose prose-invert prose-sm max-w-none text-foreground/60 text-[12px]">
+            <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{displayContent}</ReactMarkdown>
+          </div>
+        </div>
+      )}
+      {truncated && (
+        <p className="text-[10px] text-foreground/30 italic">Content truncated</p>
       )}
     </div>
   );
@@ -503,18 +623,53 @@ function TaskExpandedContent({ message }: { message: UIMessage }) {
 
       {/* Result — rendered as markdown */}
       {message.subagentStatus === "completed" && message.toolResult?.content && (
-        <div className="border-t border-foreground/[0.06] ps-5 py-1.5">
-          <p className="mb-1 text-[10px] font-medium text-foreground/30 uppercase tracking-wider">
-            Result
-          </p>
-          <div className="prose prose-invert prose-sm max-w-none text-foreground">
-            <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>
-              {formatTaskResult(message.toolResult.content)}
-            </ReactMarkdown>
-          </div>
-        </div>
+        <TaskResultBlock content={message.toolResult.content} />
       )}
     </>
+  );
+}
+
+/** Scrollable + expandable result block for Task/agent tool output */
+const TASK_RESULT_COLLAPSED_HEIGHT = 320; // px — ~20 lines of prose before requiring expand
+
+function TaskResultBlock({ content }: { content: string | Array<{ type: string; text: string }> }) {
+  const [expanded, setExpanded] = useState(false);
+  const formatted = formatTaskResult(content);
+  const isLong = formatted.length > 2000; // heuristic: content likely exceeds collapsed height
+
+  return (
+    <div className="border-t border-foreground/[0.06] ps-5 py-1.5">
+      <p className="mb-1 text-[10px] font-medium text-foreground/30 uppercase tracking-wider">
+        Result
+      </p>
+      <div
+        className="relative"
+        style={
+          !expanded && isLong
+            ? { maxHeight: TASK_RESULT_COLLAPSED_HEIGHT, overflow: "hidden" }
+            : undefined
+        }
+      >
+        <div className="prose prose-invert prose-sm max-w-none text-foreground">
+          <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>
+            {formatted}
+          </ReactMarkdown>
+        </div>
+        {/* Fade overlay when collapsed and content is long */}
+        {!expanded && isLong && (
+          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-background to-transparent pointer-events-none" />
+        )}
+      </div>
+      {isLong && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1 flex items-center gap-1 text-[10px] font-medium text-foreground/40 hover:text-foreground/70 transition-colors"
+        >
+          <ChevronsUpDown className="h-3 w-3" />
+          {expanded ? "Collapse" : "Show full result"}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -701,12 +856,11 @@ function formatDuration(ms: number): string {
 }
 
 function formatTaskResult(content: string | Array<{ type: string; text: string }>): string {
-  if (typeof content === "string") return content.slice(0, 3000);
+  if (typeof content === "string") return content;
   return content
     .filter((c) => c.type === "text")
     .map((c) => c.text)
-    .join("\n")
-    .slice(0, 3000);
+    .join("\n");
 }
 
 function formatInput(input: Record<string, unknown>): string {

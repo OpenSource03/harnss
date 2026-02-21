@@ -136,9 +136,22 @@ function parseJsonlToUIMessages(filePath: string): UIMessage[] {
             const toolResult = rawResult
               ? { ...rawResult }
               : { stdout: resultContent };
+            const isError = !!item.is_error;
+            const toolUseId = item.tool_use_id as string | undefined;
+
+            // Link result back to matching tool_call so UI shows completed state
+            if (toolUseId) {
+              const toolCallMsg = uiMessages.find(
+                (m) => m.id === `tool-${toolUseId}` && m.role === "tool_call",
+              );
+              if (toolCallMsg) {
+                toolCallMsg.toolResult = toolResult;
+                if (isError) (toolCallMsg as UIMessage & { toolError?: boolean }).toolError = true;
+              }
+            }
 
             uiMessages.push({
-              id: `imported-result-${(msg.uuid as string) || crypto.randomUUID()}-${item.tool_use_id || ""}`,
+              id: `imported-result-${(msg.uuid as string) || crypto.randomUUID()}-${toolUseId || ""}`,
               role: "tool_result",
               content: resultContent,
               toolResult,

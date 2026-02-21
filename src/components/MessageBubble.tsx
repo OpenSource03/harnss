@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from "react";
+import { memo, createContext, useContext, type ReactNode } from "react";
 import { AlertCircle, File, Folder, Info } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -6,18 +6,32 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { guessLanguage } from "@/lib/languages";
 import type { UIMessage } from "@/types";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { CopyButton } from "./CopyButton";
-import type { ComponentPropsWithoutRef } from "react";
 
 // Stable references to avoid re-creating on every render
 const REMARK_PLUGINS = [remarkGfm];
 import type { Components } from "react-markdown";
 
+/**
+ * Context to distinguish fenced code blocks (inside <pre>) from inline `code`.
+ * react-markdown v10 removed the `inline` prop from the code component —
+ * this Context replaces it by having the `pre` component signal block context.
+ */
+const IsBlockCodeContext = createContext(false);
+
 const MD_COMPONENTS: Components = {
   code: CodeBlock,
-  pre: ({ children }) => <>{children}</>,
+  // Strip the <pre> wrapper but signal block context to CodeBlock
+  pre({ children }) {
+    return (
+      <IsBlockCodeContext.Provider value={true}>
+        {children}
+      </IsBlockCodeContext.Provider>
+    );
+  },
 };
 const SYNTAX_STYLE: React.CSSProperties = {
   margin: 0,
@@ -26,6 +40,9 @@ const SYNTAX_STYLE: React.CSSProperties = {
   fontSize: "12px",
   padding: "12px",
 };
+
+/** Override oneDark's background on the inner <code> element */
+const CODE_TAG_PROPS = { style: { background: "transparent" } };
 
 /** Strip `<file path="...">...</file>` and `<folder path="...">...</folder>` context blocks from user messages */
 function stripFileContext(text: string): string {
@@ -159,17 +176,21 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
   prev.isContinuation === next.isContinuation,
 );
 
-type CodeBlockProps = ComponentPropsWithoutRef<"code"> & {
-  inline?: boolean;
-};
-
-function CodeBlock({ inline, className, children, ...props }: CodeBlockProps) {
-  const match = /language-(\w+)/.exec(className || "");
+/**
+ * Handles both fenced code blocks and inline `code` spans.
+ * Uses IsBlockCodeContext (from the `pre` component) to detect fenced blocks,
+ * since react-markdown v10 removed the `inline` prop.
+ */
+function CodeBlock(props: React.HTMLAttributes<HTMLElement> & { node?: unknown }) {
+  const { className, children } = props;
+  const isBlock = useContext(IsBlockCodeContext);
+  const match = /language-(\w+)/.exec(String(className ?? ""));
   const code = String(children).replace(/\n$/, "");
 
-  if (!inline && match) {
+  // Fenced code block with language tag → syntax highlighted
+  if (isBlock && match) {
     return (
-      <div className="group/code relative my-2 rounded-lg bg-foreground/[0.03] overflow-hidden">
+      <div className="not-prose group/code relative my-2 rounded-lg bg-foreground/[0.03] overflow-hidden">
         <div className="flex items-center justify-between bg-foreground/[0.04] px-3 py-1">
           <span className="text-[11px] text-muted-foreground">{match[1]}</span>
           <CopyButton text={code} className="opacity-0 transition-opacity group-hover/code:opacity-100" />
@@ -179,6 +200,7 @@ function CodeBlock({ inline, className, children, ...props }: CodeBlockProps) {
           language={match[1]}
           PreTag="div"
           customStyle={SYNTAX_STYLE}
+          codeTagProps={CODE_TAG_PROPS}
         >
           {code}
         </SyntaxHighlighter>
@@ -186,21 +208,41 @@ function CodeBlock({ inline, className, children, ...props }: CodeBlockProps) {
     );
   }
 
-  if (!inline && code.includes("\n")) {
+  // Fenced code block without language tag → try auto-detect
+  if (isBlock) {
+    const guessedLang = guessLanguage(code);
     return (
-      <div className="group/code relative my-2 rounded-lg bg-foreground/[0.03] overflow-hidden">
-        <div className="flex items-center justify-end bg-foreground/[0.04] px-3 py-1">
+      <div className="not-prose group/code relative my-2 rounded-lg bg-foreground/[0.03] overflow-hidden">
+        <div className="flex items-center justify-between bg-foreground/[0.04] px-3 py-1">
+          {guessedLang ? (
+            <span className="text-[11px] text-muted-foreground">{guessedLang}</span>
+          ) : (
+            <span />
+          )}
           <CopyButton text={code} className="opacity-0 transition-opacity group-hover/code:opacity-100" />
         </div>
-        <pre className="overflow-x-auto p-3 text-xs">
-          <code {...props}>{code}</code>
-        </pre>
+        {guessedLang ? (
+          <SyntaxHighlighter
+            style={oneDark}
+            language={guessedLang}
+            PreTag="div"
+            customStyle={SYNTAX_STYLE}
+            codeTagProps={CODE_TAG_PROPS}
+          >
+            {code}
+          </SyntaxHighlighter>
+        ) : (
+          <pre className="overflow-x-auto p-3 text-xs font-mono">
+            <code>{code}</code>
+          </pre>
+        )}
       </div>
     );
   }
 
+  // Inline code — not-prose prevents Typography backtick pseudo-elements
   return (
-    <code className="rounded bg-foreground/[0.08] px-1.5 py-0.5 text-xs" {...props}>
+    <code className="not-prose rounded bg-foreground/[0.08] px-1.5 py-0.5 text-xs font-mono">
       {children}
     </code>
   );

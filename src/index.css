@@ -151,6 +151,7 @@ html.glass-enabled #root {
    border-box gradient shows through the 1px transparent border as a
    liquid-glass reflection — strongest top-left and bottom-right. */
 .island {
+  position: relative;
   border: 1px solid transparent;
   background:
     linear-gradient(var(--background) 0 0) padding-box,
@@ -164,6 +165,19 @@ html.glass-enabled #root {
       oklch(1 0 0 / 0.08) 88%,
       oklch(1 0 0 / 0.18) 100%
     ) border-box;
+}
+
+/* Space gradient tint overlay — applied to ALL islands via CSS custom prop
+   set by AppLayout's space-color useEffect. Transparent when no gradient. */
+.island::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  background: var(--island-overlay-bg, transparent);
+  pointer-events: none;
+  transition: background 300ms;
 }
 
 /* Subtle island border for small sidebar elements — uniform low-opacity edge */
@@ -246,6 +260,13 @@ html.platform-win32 .drag-region {
 .search-highlight {
   animation: search-flash 1.5s ease-out;
   border-radius: var(--radius);
+}
+
+/* Disable Tailwind Typography backtick pseudo-elements on code —
+   code blocks handle their own styling in React components */
+.prose :where(code)::before,
+.prose :where(code)::after {
+  content: none !important;
 }
 
 /* ── Space switch slide ── */

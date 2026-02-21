@@ -66,9 +66,11 @@ interface UseClaudeOptions {
   sessionId: string | null;
   initialMessages?: UIMessage[];
   initialMeta?: InitialMeta | null;
+  /** Restore a pending permission when switching back to this session */
+  initialPermission?: PermissionRequest | null;
 }
 
-export function useClaude({ sessionId, initialMessages, initialMeta }: UseClaudeOptions) {
+export function useClaude({ sessionId, initialMessages, initialMeta, initialPermission }: UseClaudeOptions) {
   const [messages, setMessages] = useState<UIMessage[]>(initialMessages ?? []);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -100,7 +102,8 @@ export function useClaude({ sessionId, initialMessages, initialMeta }: UseClaude
       setSessionInfo(null);
       setTotalCost(0);
     }
-    setPendingPermission(null);
+    // Restore pending permission from background store (or clear if none)
+    setPendingPermission(initialPermission ?? null);
     setContextUsage(null);
     setIsCompacting(false);
     buffer.current.reset();

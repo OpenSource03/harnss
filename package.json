@@ -33,7 +33,8 @@
     "electron-liquid-glass": "^1.1.1",
     "electron-updater": "^6.8.3",
     "mica-electron": "^1.5.16",
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "sonner": "^2.0.7"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",

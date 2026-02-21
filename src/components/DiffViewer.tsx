@@ -1,7 +1,10 @@
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect, useCallback, memo } from "react";
 import { diffLines, diffWords } from "diff";
 import { Copy, Check, ChevronDown } from "lucide-react";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { OpenInEditorButton } from "./OpenInEditorButton";
+import { getLanguageFromPath, INLINE_HIGHLIGHT_STYLE, INLINE_CODE_TAG_STYLE } from "@/lib/languages";
 
 // ── Types ──
 
@@ -32,6 +35,33 @@ interface WordHighlight {
 
 const CONTEXT_LINES = 3;
 
+// ── Inline syntax highlighting for diff lines ──
+
+/** Renders code with syntax highlighting as inline content (not block) */
+const HighlightedCode = memo(function HighlightedCode({
+  code,
+  language,
+}: {
+  code: string;
+  language: string;
+}) {
+  if (!code) return <>{" "}</>;
+  if (language === "text") return <>{code}</>;
+
+  return (
+    <SyntaxHighlighter
+      language={language}
+      style={oneDark}
+      customStyle={INLINE_HIGHLIGHT_STYLE}
+      codeTagProps={{ style: INLINE_CODE_TAG_STYLE }}
+      PreTag="span"
+      CodeTag="span"
+    >
+      {code}
+    </SyntaxHighlighter>
+  );
+});
+
 // ── Main component ──
 
 export function DiffViewer({ oldString, newString, filePath }: DiffViewerProps) {
@@ -40,6 +70,7 @@ export function DiffViewer({ oldString, newString, filePath }: DiffViewerProps) 
   const [copied, setCopied] = useState(false);
 
   const fileName = filePath.split("/").pop() ?? filePath;
+  const language = getLanguageFromPath(filePath);
 
   // Auto-load full file on mount
   useEffect(() => {
@@ -122,7 +153,7 @@ export function DiffViewer({ oldString, newString, filePath }: DiffViewerProps) 
               onExpand={() => expandSection(i)}
             />
           ) : (
-            <DiffLineRow key={i} line={line} />
+            <DiffLineRow key={i} line={line} language={language} />
           ),
         )}
       </div>
@@ -132,7 +163,7 @@ export function DiffViewer({ oldString, newString, filePath }: DiffViewerProps) 
 
 // ── Diff line row ──
 
-function DiffLineRow({ line }: { line: DiffLine }) {
+function DiffLineRow({ line, language }: { line: DiffLine; language: string }) {
   // Left accent: thin colored border on changed lines
   const accentClass =
     line.type === "removed"
@@ -170,7 +201,7 @@ function DiffLineRow({ line }: { line: DiffLine }) {
       >
         {line.lineNum ?? ""}
       </span>
-      {/* Content */}
+      {/* Content — syntax highlighted with diff background colors */}
       <span
         className={`flex-1 px-3 py-px whitespace-pre-wrap wrap-break-word ${contentClass}`}
       >
@@ -186,11 +217,11 @@ function DiffLineRow({ line }: { line: DiffLine }) {
                     : ""
               }
             >
-              {part.value}
+              <HighlightedCode code={part.value} language={language} />
             </span>
           ))
         ) : (
-          line.content || " "
+          <HighlightedCode code={line.content} language={language} />
         )}
       </span>
     </div>

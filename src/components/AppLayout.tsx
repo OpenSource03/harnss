@@ -54,7 +54,6 @@ export function AppLayout() {
   const [editingSpace, setEditingSpace] = useState<Space | null>(null);
   const [scrollToMessageId, setScrollToMessageId] = useState<string | undefined>();
   const [glassOverlayStyle, setGlassOverlayStyle] = useState<React.CSSProperties | null>(null);
-  const [contentOverlayStyle, setContentOverlayStyle] = useState<React.CSSProperties | null>(null);
   const [isResizing, setIsResizing] = useState(false);
 
   const hasProjects = projectManager.projects.length > 0;
@@ -266,6 +265,7 @@ export function AppLayout() {
     if (!space || space.color.chroma === 0) {
       root.style.removeProperty("--space-hue");
       root.style.removeProperty("--space-chroma");
+      root.style.removeProperty("--island-overlay-bg");
       setGlassOverlayStyle(null);
       return;
     }
@@ -311,18 +311,19 @@ export function AppLayout() {
 
     if (gradientHue !== undefined) {
       const a = isDark ? 0.07 : 0.05;
-      setContentOverlayStyle({
-        background: `linear-gradient(135deg, oklch(0.5 ${c} ${hue} / ${a}), oklch(0.5 ${c} ${gradientHue} / ${a}))`,
-      });
+      // Set CSS custom prop so .island::before picks up the gradient on ALL islands
+      root.style.setProperty(
+        "--island-overlay-bg",
+        `linear-gradient(135deg, oklch(0.5 ${c} ${hue} / ${a}), oklch(0.5 ${c} ${gradientHue} / ${a}))`,
+      );
     } else {
-      setContentOverlayStyle(null);
+      root.style.removeProperty("--island-overlay-bg");
     }
 
     return () => {
-      const vars = ["--space-hue", "--space-chroma", "--background", "--accent", "--border", "--sidebar", "--sidebar-accent"];
+      const vars = ["--space-hue", "--space-chroma", "--background", "--accent", "--border", "--sidebar", "--sidebar-accent", "--island-overlay-bg"];
       for (const v of vars) root.style.removeProperty(v);
       setGlassOverlayStyle(null);
-      setContentOverlayStyle(null);
     };
   }, [spaceManager.activeSpace]);
 
@@ -569,13 +570,6 @@ export function AppLayout() {
 
       <div className={`flex min-w-0 flex-1 ms-2 me-2 my-2 ${isResizing ? "select-none" : ""}`}>
         <div className="island relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg bg-background">
-          {/* Space gradient overlay on the chat island */}
-          {contentOverlayStyle && (
-            <div
-              className="pointer-events-none absolute inset-0 z-[1] rounded-lg transition-[background] duration-300"
-              style={contentOverlayStyle}
-            />
-          )}
           {manager.activeSessionId ? (
             <>
               <div className="pointer-events-none absolute inset-x-0 top-0 z-[5] h-24 bg-gradient-to-b from-black to-transparent" />

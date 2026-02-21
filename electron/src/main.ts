@@ -47,6 +47,7 @@ function createWindow(): void {
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
     width: 1200,
     height: 800,
+    icon: path.join(__dirname, "../../build/icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -201,6 +202,11 @@ function openDevToolsWindow(): void {
 app.whenReady().then(() => {
   createWindow();
   initAutoUpdater(getMainWindow);
+
+  // Set dock icon in dev mode — packaged builds get it from the .app bundle
+  if (process.platform === "darwin" && app.dock) {
+    app.dock.setIcon(path.join(__dirname, "../../build/icon.png"));
+  }
 
   const shortcuts = ["CommandOrControl+Alt+I", "F12", "CommandOrControl+Shift+J"];
   for (const shortcut of shortcuts) {

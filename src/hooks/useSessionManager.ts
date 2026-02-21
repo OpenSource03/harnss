@@ -1,7 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { ChatSession, UIMessage, PersistedSession, Project, ClaudeEvent, SystemInitEvent, SessionInfo, ImageAttachment, McpServerStatus, McpServerConfig, ModelInfo } from "../types";
+import { toast } from "sonner";
+import type { ChatSession, UIMessage, PersistedSession, Project, ClaudeEvent, SystemInitEvent, SessionInfo, PermissionRequest, ImageAttachment, McpServerStatus, McpServerConfig, ModelInfo } from "../types";
 import { toMcpStatusState } from "../types/ui";
-import type { ACPSessionEvent, ACPConfigOption } from "../types/acp";
+import type { ACPSessionEvent, ACPPermissionEvent, ACPConfigOption } from "../types/acp";
+import { normalizeToolInput as acpNormalizeToolInput } from "../lib/acp-adapter";
 import { useClaude } from "./useClaude";
 import { useACP } from "./useACP";
 import { BackgroundSessionStore } from "../lib/background-session-store";
@@ -30,6 +32,9 @@ export function useSessionManager(projects: Project[]) {
     totalCost: number;
   } | null>(null);
   const [initialConfigOptions, setInitialConfigOptions] = useState<ACPConfigOption[]>([]);
+  // Permission state to pass into hooks when restoring a background session
+  const [initialPermission, setInitialPermission] = useState<PermissionRequest | null>(null);
+  const [initialRawAcpPermission, setInitialRawAcpPermission] = useState<ACPPermissionEvent | null>(null);
   const [acpMcpStatuses, setAcpMcpStatuses] = useState<McpServerStatus[]>([]);
   // Eager session start: pre-started SDK session for immediate MCP status display
   const [preStartedSessionId, setPreStartedSessionId] = useState<string | null>(null);
@@ -53,8 +58,8 @@ export function useSessionManager(projects: Project[]) {
   const claudeSessionId = (!isACP && activeSessionId !== DRAFT_ID) ? activeSessionId : null;
   const acpSessionId = (isACP && activeSessionId !== DRAFT_ID) ? activeSessionId : null;
 
-  const claude = useClaude({ sessionId: claudeSessionId, initialMessages: isACP ? [] : initialMessages, initialMeta: isACP ? null : initialMeta });
-  const acp = useACP({ sessionId: acpSessionId, initialMessages: isACP ? initialMessages : [], initialConfigOptions: isACP ? initialConfigOptions : [], initialMeta: isACP ? initialMeta : null });
+  const claude = useClaude({ sessionId: claudeSessionId, initialMessages: isACP ? [] : initialMessages, initialMeta: isACP ? null : initialMeta, initialPermission: isACP ? null : initialPermission });
+  const acp = useACP({ sessionId: acpSessionId, initialMessages: isACP ? initialMessages : [], initialConfigOptions: isACP ? initialConfigOptions : [], initialMeta: isACP ? initialMeta : null, initialPermission: isACP ? initialPermission : null, initialRawAcpPermission: isACP ? initialRawAcpPermission : null });
 
   // Pick the active engine's state
   const engine = isACP ? acp : claude;
@@ -81,10 +86,14 @@ export function useSessionManager(projects: Project[]) {
   isConnectedRef.current = engine.isConnected;
   const sessionInfoRef = useRef(engine.sessionInfo);
   sessionInfoRef.current = engine.sessionInfo;
+  const pendingPermissionRef = useRef(engine.pendingPermission);
+  pendingPermissionRef.current = engine.pendingPermission;
+  // Stable ref to switchSession so toast callbacks don't capture stale closures
+  const switchSessionRef = useRef<(id: string) => Promise<void>>(undefined);
 
   const backgroundStoreRef = useRef(new BackgroundSessionStore());
 
-  // Wire up background store processing change callback for sidebar spinner
+  // Wire up background store callbacks for sidebar indicators
   useEffect(() => {
     backgroundStoreRef.current.onProcessingChange = (sessionId, isProcessing) => {
       setSessions((prev) =>
@@ -92,6 +101,31 @@ export function useSessionManager(projects: Project[]) {
           s.id === sessionId ? { ...s, isProcessing } : s,
         ),
       );
+    };
+
+    // When a background session receives a permission request, update sidebar + show toast
+    backgroundStoreRef.current.onPermissionRequest = (sessionId, permission) => {
+      // Update sidebar badge
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId ? { ...s, hasPendingPermission: true } : s,
+        ),
+      );
+
+      // Show a persistent toast so the user notices the blocked session
+      const session = sessionsRef.current.find((s) => s.id === sessionId);
+      const sessionTitle = session?.title ?? "Background session";
+      const toolLabel = permission.toolName;
+
+      toast(`${sessionTitle}`, {
+        id: `permission-${sessionId}`,
+        description: `Waiting for permission: ${toolLabel}`,
+        duration: Infinity, // Permission is blocking — keep until resolved
+        action: {
+          label: "Switch",
+          onClick: () => switchSessionRef.current?.(sessionId),
+        },
+      });
     };
   }, []);
 
@@ -312,7 +346,38 @@ export function useSessionManager(projects: Project[]) {
       if (sid === activeSessionIdRef.current) return;
       backgroundStoreRef.current.handleACPEvent(event);
     });
-    return () => { unsub(); unsubAcp(); };
+
+    // Route permission requests for non-active Claude sessions to the background store
+    const unsubBgPerm = window.claude.onPermissionRequest((data) => {
+      const sid = data._sessionId;
+      if (!sid || sid === activeSessionIdRef.current || sid === preStartedSessionIdRef.current) return;
+      backgroundStoreRef.current.setPermission(sid, {
+        requestId: data.requestId,
+        toolName: data.toolName,
+        toolInput: data.toolInput,
+        toolUseId: data.toolUseId,
+        suggestions: data.suggestions,
+        decisionReason: data.decisionReason,
+      });
+    });
+
+    // Route permission requests for non-active ACP sessions to the background store
+    const unsubBgAcpPerm = window.claude.acp.onPermissionRequest((data: ACPPermissionEvent) => {
+      const sid = data._sessionId;
+      if (!sid || sid === activeSessionIdRef.current) return;
+      backgroundStoreRef.current.setPermission(
+        sid,
+        {
+          requestId: data.requestId,
+          toolName: data.toolCall.title,
+          toolInput: acpNormalizeToolInput(data.toolCall.rawInput),
+          toolUseId: data.toolCall.toolCallId,
+        },
+        data,
+      );
+    });
+
+    return () => { unsub(); unsubAcp(); unsubBgPerm(); unsubBgAcpPerm(); };
   }, []);
 
   // Load sessions for ALL projects
@@ -446,6 +511,18 @@ export function useSessionManager(projects: Project[]) {
     );
   }, [activeSessionId, engine.isProcessing]);
 
+  // Clear sidebar badge when the active session's permission is resolved
+  useEffect(() => {
+    if (!activeSessionId || activeSessionId === DRAFT_ID) return;
+    if (!engine.pendingPermission) {
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === activeSessionId ? { ...s, hasPendingPermission: false } : s,
+        ),
+      );
+    }
+  }, [activeSessionId, engine.pendingPermission]);
+
   const saveCurrentSession = useCallback(async () => {
     const id = activeSessionIdRef.current;
     if (!id || id === DRAFT_ID || messagesRef.current.length === 0) return;
@@ -476,6 +553,8 @@ export function useSessionManager(projects: Project[]) {
         isConnected: isConnectedRef.current,
         sessionInfo: sessionInfoRef.current,
         totalCost: totalCostRef.current,
+        pendingPermission: pendingPermissionRef.current ?? null,
+        rawAcpPermission: null, // ACP ref is internal to useACP — will be restored via initialRawAcpPermission
       });
     }
   }, []);
@@ -493,6 +572,8 @@ export function useSessionManager(projects: Project[]) {
       setDraftProjectId(projectId);
       setInitialMessages([]);
       setInitialMeta(null);
+      setInitialPermission(null);
+      setInitialRawAcpPermission(null);
       setActiveSessionId(DRAFT_ID);
       setSessions((prev) => prev.map((s) => ({ ...s, isActive: false })));
 
@@ -634,6 +715,8 @@ export function useSessionManager(projects: Project[]) {
       if (!reusedPreStarted) {
         setInitialMessages([]);
         setInitialMeta(null);
+        setInitialPermission(null);
+        setInitialRawAcpPermission(null);
       }
       setActiveSessionId(sessionId);
       setDraftProjectId(null);
@@ -673,11 +756,21 @@ export function useSessionManager(projects: Project[]) {
           sessionInfo: bgState.sessionInfo,
           totalCost: bgState.totalCost,
         });
+        // Restore pending permission so the hook picks it up on reset
+        setInitialPermission(bgState.pendingPermission);
+        setInitialRawAcpPermission(bgState.rawAcpPermission);
         setActiveSessionId(id);
         setDraftProjectId(null);
+        // Clear sidebar badge + mark active
         setSessions((prev) =>
-          prev.map((s) => ({ ...s, isActive: s.id === id })),
+          prev.map((s) => ({
+            ...s,
+            isActive: s.id === id,
+            ...(s.id === id ? { hasPendingPermission: false } : {}),
+          })),
         );
+        // Dismiss the toast for this session since the user is now viewing it
+        toast.dismiss(`permission-${id}`);
         return;
       }
 
@@ -686,6 +779,9 @@ export function useSessionManager(projects: Project[]) {
       if (data) {
         setInitialMessages(data.messages);
         setInitialMeta(null);
+        // No live process = no pending permission
+        setInitialPermission(null);
+        setInitialRawAcpPermission(null);
         setActiveSessionId(id);
         setDraftProjectId(null);
         setSessions((prev) =>
@@ -705,6 +801,9 @@ export function useSessionManager(projects: Project[]) {
     [saveCurrentSession, seedBackgroundStore, abandonEagerSession],
   );
 
+  // Keep switchSessionRef in sync for stable toast callbacks
+  switchSessionRef.current = switchSession;
+
   const deleteSession = useCallback(
     async (id: string) => {
       const session = sessionsRef.current.find((s) => s.id === id);
@@ -718,11 +817,15 @@ export function useSessionManager(projects: Project[]) {
         liveSessionIdsRef.current.delete(id);
       }
       backgroundStoreRef.current.delete(id);
+      // Dismiss any permission toast for this session
+      toast.dismiss(`permission-${id}`);
       await window.claude.sessions.delete(session.projectId, id);
       if (activeSessionIdRef.current === id) {
         setActiveSessionId(null);
         setInitialMessages([]);
         setInitialMeta(null);
+        setInitialPermission(null);
+        setInitialRawAcpPermission(null);
       }
       setSessions((prev) => prev.filter((s) => s.id !== id));
     },
@@ -1160,6 +1263,8 @@ export function useSessionManager(projects: Project[]) {
     setDraftProjectId(null);
     setInitialMessages([]);
     setInitialMeta(null);
+    setInitialPermission(null);
+    setInitialRawAcpPermission(null);
     setSessions((prev) => prev.map((s) => ({ ...s, isActive: false })));
   }, [saveCurrentSession, seedBackgroundStore, abandonEagerSession]);
 

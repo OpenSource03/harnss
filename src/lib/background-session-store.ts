@@ -7,9 +7,10 @@ import type {
   ResultEvent,
   UIMessage,
   SessionInfo,
+  PermissionRequest,
   SubagentToolStep,
 } from "../types";
-import type { ACPSessionEvent } from "../types/acp";
+import type { ACPSessionEvent, ACPPermissionEvent } from "../types/acp";
 import {
   getParentId,
   extractTextContent,
@@ -28,12 +29,18 @@ export interface BackgroundSessionState {
   isConnected: boolean;
   sessionInfo: SessionInfo | null;
   totalCost: number;
+  pendingPermission: PermissionRequest | null;
+  /** Raw ACP permission event — needed for optionId lookup when responding */
+  rawAcpPermission: ACPPermissionEvent | null;
 }
 
 interface InternalState extends BackgroundSessionState {
   parentToolMap: Map<string, string>;
   currentStreamingMsgId: string | null;
 }
+
+/** Callback fired when a background session receives a permission request */
+type PermissionRequestCallback = (sessionId: string, permission: PermissionRequest) => void;
 
 /**
  * Accumulates UIMessages for sessions not currently active in useClaude.
@@ -43,6 +50,7 @@ export class BackgroundSessionStore {
   private sessions = new Map<string, InternalState>();
   private idCounter = 0;
   onProcessingChange?: (sessionId: string, isProcessing: boolean) => void;
+  onPermissionRequest?: PermissionRequestCallback;
 
   private nextId(prefix: string): string {
     return `${prefix}-${Date.now()}-${this.idCounter++}`;
@@ -72,6 +80,8 @@ export class BackgroundSessionStore {
         isConnected: false,
         sessionInfo: null,
         totalCost: 0,
+        pendingPermission: null,
+        rawAcpPermission: null,
         parentToolMap: new Map(),
         currentStreamingMsgId: null,
       };
@@ -457,6 +467,14 @@ export class BackgroundSessionStore {
     }
   }
 
+  /** Store a pending permission for a background session and fire the callback. */
+  setPermission(sessionId: string, permission: PermissionRequest, rawAcpPermission?: ACPPermissionEvent | null): void {
+    const state = this.getOrCreate(sessionId);
+    state.pendingPermission = permission;
+    state.rawAcpPermission = rawAcpPermission ?? null;
+    this.onPermissionRequest?.(sessionId, permission);
+  }
+
   has(sessionId: string): boolean {
     return this.sessions.has(sessionId);
   }
@@ -471,6 +489,8 @@ export class BackgroundSessionStore {
       isConnected: state.isConnected,
       sessionInfo: state.sessionInfo ? { ...state.sessionInfo } : null,
       totalCost: state.totalCost,
+      pendingPermission: state.pendingPermission ? { ...state.pendingPermission } : null,
+      rawAcpPermission: state.rawAcpPermission,
     };
   }
 
@@ -507,6 +527,8 @@ export class BackgroundSessionStore {
       isConnected: state.isConnected,
       sessionInfo: state.sessionInfo ? { ...state.sessionInfo } : null,
       totalCost: state.totalCost,
+      pendingPermission: state.pendingPermission ? { ...state.pendingPermission } : null,
+      rawAcpPermission: state.rawAcpPermission ?? null,
       parentToolMap,
       currentStreamingMsgId: streamingMsg?.id ?? null,
     });
@@ -517,6 +539,9 @@ export class BackgroundSessionStore {
     const state = this.sessions.get(sessionId);
     if (!state) return;
     state.isConnected = false;
+    // Dead process = dead permission — clear both
+    state.pendingPermission = null;
+    state.rawAcpPermission = null;
     if (state.isProcessing) {
       state.isProcessing = false;
       this.onProcessingChange?.(sessionId, false);

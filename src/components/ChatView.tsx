@@ -39,6 +39,22 @@ export const ChatView = memo(function ChatView({ messages, extraBottomPadding, s
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  // ResizeObserver on scroll content: catches height changes from collapsible
+  // expansion (ThinkingBlock, tool details, etc.) that don't trigger a messages update
+  useEffect(() => {
+    const viewport = scrollAreaRef.current?.querySelector<HTMLElement>(
+      "[data-radix-scroll-area-viewport]",
+    );
+    const content = viewport?.firstElementChild;
+    if (!content) return;
+
+    const observer = new ResizeObserver(() => {
+      scrollToBottom();
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [scrollToBottom]);
+
   // Scroll to specific message (from search navigation)
   useEffect(() => {
     if (!scrollToMessageId) return;
