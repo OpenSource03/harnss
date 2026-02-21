@@ -261,7 +261,19 @@ export function useSessionManager(projects: Project[]) {
       cwd: project.path,
       mcpServers: servers,
     });
-    if (result.error || !result.sessionId) return;
+    if (result.error || !result.sessionId) {
+      // Show error in the UI after restart failure — use setMessages directly
+      // because session ID hasn't changed (no reset effect to consume initialMessages)
+      const errorMsg = result.error || "Failed to restart agent session";
+      acp.setMessages(prev => [...prev, {
+        id: `system-error-${Date.now()}`,
+        role: "system",
+        content: errorMsg,
+        isError: true,
+        timestamp: Date.now(),
+      }]);
+      return;
+    }
 
     const newId = result.sessionId;
     liveSessionIdsRef.current.add(newId);
@@ -631,6 +643,15 @@ export function useSessionManager(projects: Project[]) {
         });
         console.log("[materializeDraft] acp:start result:", result);
         if (result.error || !result.sessionId) {
+          // Show error in the UI so user knows what went wrong
+          const errorMsg = result.error || "Failed to start agent session";
+          setInitialMessages(prev => [...prev, {
+            id: `system-error-${Date.now()}`,
+            role: "system",
+            content: errorMsg,
+            isError: true,
+            timestamp: Date.now(),
+          }]);
           materializingRef.current = false;
           return "";
         }
@@ -973,6 +994,7 @@ export function useSessionManager(projects: Project[]) {
           id: `system-error-${Date.now()}`,
           role: "system" as const,
           content: "ACP session disconnected. Please start a new session.",
+          isError: true,
           timestamp: Date.now(),
         }]);
         return;
@@ -992,7 +1014,8 @@ export function useSessionManager(projects: Project[]) {
         acp.setMessages((prev) => [...prev, {
           id: `system-error-${Date.now()}`,
           role: "system" as const,
-          content: "Failed to reconnect ACP session. Please start a new session.",
+          content: result.error || "Failed to reconnect ACP session. Please start a new session.",
+          isError: true,
           timestamp: Date.now(),
         }]);
         return;

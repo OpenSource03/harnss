@@ -282,11 +282,25 @@ export function useACP({ sessionId, initialMessages, initialConfigOptions, initi
       setIsProcessing(false);
     });
 
-    const unsubExit = window.claude.acp.onExit((data: { _sessionId: string; code: number | null }) => {
+    const unsubExit = window.claude.acp.onExit((data: { _sessionId: string; code: number | null; error?: string }) => {
       if (data._sessionId !== sessionIdRef.current) return;
-      acpLog("SESSION_EXIT", { code: data.code });
+      acpLog("SESSION_EXIT", { code: data.code, error: data.error });
       setIsConnected(false);
       setIsProcessing(false);
+      // Show error message in UI if session exited with error
+      if (data.code !== 0 && data.code !== null) {
+        const errorDetail = data.error || `Agent process exited with code ${data.code}`;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextAcpId("system-exit"),
+            role: "system",
+            content: errorDetail,
+            isError: true,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
     });
 
     return () => {

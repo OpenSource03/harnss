@@ -61,6 +61,8 @@ function createWindow(): void {
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
     width: 1200,
     height: 800,
+    minWidth: 1280,
+    minHeight: 600,
     // build/ isn't in the asar (buildResources only); use dist/ (Vite output) in production
     icon: app.isPackaged
       ? path.join(__dirname, "../../dist/icon.png")
@@ -85,7 +87,7 @@ function createWindow(): void {
     // WebContents is automatically transparent (no transparent: true needed),
     // and the native title bar stays intact.
     windowOptions.autoHideMenuBar = true;
-    windowOptions.backgroundMaterial = "mica";
+    windowOptions.backgroundMaterial = "auto";
   } else {
     // macOS without glass / Linux
     windowOptions.titleBarStyle = "hiddenInset";

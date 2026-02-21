@@ -414,6 +414,16 @@ export function AppLayout() {
     });
   }, [hasAgents]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Layout constraints ──
+  // Minimum chat width to keep it usable when panels are open
+  const MIN_CHAT_WIDTH = 380;
+  // ToolPicker strip (w-14 = 56px) + its left margin (ms-2 = 8px)
+  const TOOL_PICKER_WIDTH = 64;
+  const RESIZE_HANDLE_WIDTH = 8;
+
+  const contentRef = useRef<HTMLDivElement>(null);
+  const rightPanelRef = useRef<HTMLDivElement>(null);
+
   // ── Right panel resize ──
 
   const MIN_PANEL_WIDTH = 200;
@@ -428,10 +438,20 @@ export function AppLayout() {
       setIsResizing(true);
       const startX = e.clientX;
       const startWidth = rightPanelWidthRef.current;
+      // Capture tools panel visibility at drag start
+      const toolsVisible = !!toolsColumnRef.current;
 
       const onMouseMove = (ev: MouseEvent) => {
+        // Dynamically cap so the chat always keeps MIN_CHAT_WIDTH
+        const containerWidth = contentRef.current?.clientWidth ?? window.innerWidth;
+        let reserved = MIN_CHAT_WIDTH + TOOL_PICKER_WIDTH + RESIZE_HANDLE_WIDTH;
+        if (toolsVisible) {
+          reserved += toolsPanelWidthRef.current + RESIZE_HANDLE_WIDTH;
+        }
+        const dynamicMax = Math.max(MIN_PANEL_WIDTH, containerWidth - reserved);
+
         const delta = startX - ev.clientX;
-        const next = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, startWidth + delta));
+        const next = Math.max(MIN_PANEL_WIDTH, Math.min(Math.min(MAX_PANEL_WIDTH, dynamicMax), startWidth + delta));
         settings.setRightPanelWidth(next);
       };
 
@@ -462,10 +482,20 @@ export function AppLayout() {
       setIsResizing(true);
       const startX = e.clientX;
       const startWidth = toolsPanelWidthRef.current;
+      // Capture right panel visibility at drag start
+      const rightVisible = !!rightPanelRef.current;
 
       const onMouseMove = (ev: MouseEvent) => {
+        // Dynamically cap so the chat always keeps MIN_CHAT_WIDTH
+        const containerWidth = contentRef.current?.clientWidth ?? window.innerWidth;
+        let reserved = MIN_CHAT_WIDTH + TOOL_PICKER_WIDTH + RESIZE_HANDLE_WIDTH;
+        if (rightVisible) {
+          reserved += rightPanelWidthRef.current + RESIZE_HANDLE_WIDTH;
+        }
+        const dynamicMax = Math.max(MIN_TOOLS_WIDTH, containerWidth - reserved);
+
         const delta = startX - ev.clientX;
-        const next = Math.max(MIN_TOOLS_WIDTH, Math.min(MAX_TOOLS_WIDTH, startWidth + delta));
+        const next = Math.max(MIN_TOOLS_WIDTH, Math.min(Math.min(MAX_TOOLS_WIDTH, dynamicMax), startWidth + delta));
         settings.setToolsPanelWidth(next);
       };
 
@@ -568,8 +598,8 @@ export function AppLayout() {
         onDeleteSpace={handleDeleteSpace}
       />
 
-      <div className={`flex min-w-0 flex-1 ms-2 me-2 my-2 ${isResizing ? "select-none" : ""}`}>
-        <div className="island relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg bg-background">
+      <div ref={contentRef} className={`flex min-w-0 flex-1 ms-2 me-2 my-2 ${isResizing ? "select-none" : ""}`}>
+        <div className="island relative flex min-w-[380px] flex-1 flex-col overflow-hidden rounded-lg bg-background">
           {manager.activeSessionId ? (
             <>
               <div className="pointer-events-none absolute inset-x-0 top-0 z-[5] h-24 bg-gradient-to-b from-black to-transparent" />
@@ -668,6 +698,7 @@ export function AppLayout() {
 
             {/* Right panel — Tasks / Agents */}
             <div
+              ref={rightPanelRef}
               className="flex shrink-0 flex-col gap-2 overflow-hidden"
               style={{ width: settings.rightPanelWidth }}
             >
