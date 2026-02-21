@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { ChatSession, UIMessage, PersistedSession, Project, ClaudeEvent, SystemInitEvent, SessionInfo, ImageAttachment, McpServerStatus, McpServerConfig } from "../types";
+import type { ChatSession, UIMessage, PersistedSession, Project, ClaudeEvent, SystemInitEvent, SessionInfo, ImageAttachment, McpServerStatus, McpServerConfig, ModelInfo } from "../types";
 import { toMcpStatusState } from "../types/ui";
 import type { ACPSessionEvent, ACPConfigOption } from "../types/acp";
 import { useClaude } from "./useClaude";
@@ -37,6 +37,8 @@ export function useSessionManager(projects: Project[]) {
   const [draftMcpStatuses, setDraftMcpStatuses] = useState<McpServerStatus[]>([]);
   const draftMcpStatusesRef = useRef<McpServerStatus[]>([]);
   draftMcpStatusesRef.current = draftMcpStatuses;
+  // Cached models from any SDK session — account-level, doesn't change between sessions
+  const [cachedModels, setCachedModels] = useState<ModelInfo[]>([]);
   // ACP agent tracking — needed to restart the session with updated MCP servers
   const acpAgentIdRef = useRef<string | null>(null);
   // ACP-side session ID — persisted so we can call session/load on revival after restart
@@ -133,6 +135,12 @@ export function useSessionManager(projects: Project[]) {
           name: s.name,
           status: toMcpStatusState(s.status),
         })));
+      }
+
+      // Same pattern for models — fetch directly since system/init already fired
+      const modelsResult = await window.claude.supportedModels(result.sessionId);
+      if (modelsResult.models?.length && preStartedSessionIdRef.current === result.sessionId) {
+        setCachedModels(modelsResult.models);
       }
     } else {
       // Draft was abandoned before eager start completed
@@ -1236,7 +1244,7 @@ export function useSessionManager(projects: Project[]) {
             }
           })
         : claude.reconnectMcpServer,
-    supportedModels: claude.supportedModels,
+    supportedModels: claude.supportedModels.length > 0 ? claude.supportedModels : cachedModels,
     restartWithMcpServers: isACP
       ? isDraft
         ? async (servers: McpServerConfig[]) => {

@@ -12,6 +12,7 @@ import {
   ChevronDown,
   File,
   Folder,
+  Loader2,
   Paperclip,
   Shield,
   Square,
@@ -32,12 +33,6 @@ import {
 } from "@/components/ui/tooltip";
 import type { ImageAttachment, ContextUsage, AgentDefinition, ACPConfigOption, ModelInfo } from "@/types";
 import { flattenConfigOptions } from "@/types/acp";
-
-const FALLBACK_MODELS = [
-  { id: "claude-opus-4-6", label: "Opus 4.6" },
-  { id: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5" },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
-] as const;
 
 const PERMISSION_MODES = [
   { id: "plan", label: "Plan" },
@@ -193,10 +188,10 @@ export const InputBar = memo(function InputBar({
   const mentionStartOffset = useRef<number>(0);
   const fileCachePathRef = useRef<string | undefined>(undefined);
 
-  // Use dynamic models from SDK when available, fall back to hardcoded list
   const modelList = supportedModels?.length
     ? supportedModels.map((m) => ({ id: m.value, label: m.displayName, description: m.description }))
-    : FALLBACK_MODELS.map((m) => ({ id: m.id, label: m.label, description: undefined as string | undefined }));
+    : [];
+  const modelsLoading = modelList.length === 0;
   const selectedModel = modelList.find((m) => m.id === model) ?? modelList[0];
   const selectedMode =
     PERMISSION_MODES.find((m) => m.id === permissionMode) ?? PERMISSION_MODES[0];
@@ -729,32 +724,39 @@ export const InputBar = memo(function InputBar({
               </>
             )
           ) : (
-            /* Claude SDK controls — hardcoded model, permission mode, thinking */
+            /* Claude SDK controls — model, permission mode, thinking */
             <>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground">
-                    {selectedModel.label}
-                    <ChevronDown className="h-3 w-3" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  {modelList.map((m) => (
-                    <DropdownMenuItem
-                      key={m.id}
-                      onClick={() => onModelChange(m.id)}
-                      className={m.id === model ? "bg-accent" : ""}
-                    >
-                      <div>
-                        <div>{m.label}</div>
-                        {m.description && (
-                          <div className="text-[10px] text-muted-foreground">{m.description}</div>
-                        )}
-                      </div>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {modelsLoading ? (
+                <div className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Loading models…
+                </div>
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground">
+                      {selectedModel?.label}
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {modelList.map((m) => (
+                      <DropdownMenuItem
+                        key={m.id}
+                        onClick={() => onModelChange(m.id)}
+                        className={m.id === model ? "bg-accent" : ""}
+                      >
+                        <div>
+                          <div>{m.label}</div>
+                          {m.description && (
+                            <div className="text-[10px] text-muted-foreground">{m.description}</div>
+                          )}
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
