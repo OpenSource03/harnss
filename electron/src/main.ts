@@ -19,7 +19,6 @@ if (process.platform !== "win32") {
 }
 import { log } from "./lib/logger";
 import { glassEnabled, liquidGlass } from "./lib/glass";
-import { micaEnabled, applyMicaEffect } from "./lib/mica";
 import { initAutoUpdater } from "./lib/updater";
 import { sessions } from "./ipc/claude-sessions";
 import { acpSessions } from "./ipc/acp-sessions";
@@ -52,11 +51,6 @@ if (glassEnabled) {
   app.commandLine.appendSwitch("remote-allow-origins", "*");
 }
 
-// --- Mica: Chromium needs transparent visuals for DWM backdrop to show through content ---
-if (micaEnabled) {
-  app.commandLine.appendSwitch("enable-transparent-visuals");
-}
-
 let mainWindow: BrowserWindow | null = null;
 
 function getMainWindow(): BrowserWindow | null {
@@ -86,17 +80,12 @@ function createWindow(): void {
     windowOptions.titleBarStyle = "hidden";
     windowOptions.transparent = true;
     windowOptions.trafficLightPosition = { x: 16, y: 16 };
-  } else if (micaEnabled) {
-    // Windows + mica: transparent content area so DWM backdrop shows through.
-    // Uses regular BrowserWindow (not MicaBrowserWindow) to keep the native
-    // title bar — MicaBrowserWindow's onShow DWM FRAME calls break it.
-    windowOptions.autoHideMenuBar = true;
-    windowOptions.transparent = true;
-    windowOptions.backgroundColor = "#00000000";
   } else if (process.platform === "win32") {
-    // Windows without mica: solid background, no transparency
+    // Windows: native Electron backgroundMaterial handles DWM mica/acrylic.
+    // WebContents is automatically transparent (no transparent: true needed),
+    // and the native title bar stays intact.
     windowOptions.autoHideMenuBar = true;
-    windowOptions.backgroundColor = "#18181b";
+    windowOptions.backgroundMaterial = "mica";
   } else {
     // macOS without glass / Linux
     windowOptions.titleBarStyle = "hiddenInset";
@@ -123,19 +112,12 @@ function createWindow(): void {
         log("GLASS", `Liquid glass applied, viewId=${glassId}`);
       }
     });
-  } else if (micaEnabled) {
-    // Windows: apply DWM mica/acrylic effect on a regular BrowserWindow.
-    // The window already has a visible native frame — mica just adds the
-    // translucent backdrop. If it fails, the window still works normally.
-    mainWindow.webContents.once("dom-ready", () => {
-      applyMicaEffect(mainWindow!);
-    });
   }
 }
 
 // Renderer uses this to set `glass-enabled` CSS class → transparent backgrounds for both platforms
 ipcMain.handle("app:getGlassEnabled", () => {
-  return !!(glassEnabled || micaEnabled);
+  return !!(glassEnabled || process.platform === "win32");
 });
 
 // --- Register all IPC modules ---
