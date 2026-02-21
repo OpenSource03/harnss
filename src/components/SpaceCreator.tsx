@@ -21,7 +21,7 @@ interface SpaceCreatorProps {
 
 export function SpaceCreator({ open, onOpenChange, editingSpace, onSave }: SpaceCreatorProps) {
   const [name, setName] = useState("");
-  const [icon, setIcon] = useState("layers");
+  const [icon, setIcon] = useState("Layers");
   const [iconType, setIconType] = useState<"emoji" | "lucide">("lucide");
   const [color, setColor] = useState<SpaceColor>({ hue: 260, chroma: 0.15 });
 
@@ -33,7 +33,7 @@ export function SpaceCreator({ open, onOpenChange, editingSpace, onSave }: Space
       setColor(editingSpace.color);
     } else {
       setName("");
-      setIcon("layers");
+      setIcon("Layers");
       setIconType("lucide");
       setColor({ hue: 260, chroma: 0.15 });
     }

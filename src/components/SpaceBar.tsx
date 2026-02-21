@@ -1,6 +1,5 @@
 import { memo, useState, useCallback } from "react";
 import { Plus } from "lucide-react";
-import { icons } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -12,6 +11,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { Pencil, Trash2 } from "lucide-react";
+import { resolveLucideIcon } from "@/lib/icon-utils";
 import type { Space } from "@/types";
 
 interface SpaceBarProps {
@@ -28,7 +28,7 @@ function SpaceIcon({ space, size = 18 }: { space: Space; size?: number }) {
   if (space.iconType === "emoji") {
     return <span style={{ fontSize: size - 2 }}>{space.icon}</span>;
   }
-  const Icon = icons[space.icon as keyof typeof icons];
+  const Icon = resolveLucideIcon(space.icon);
   if (!Icon) return <span style={{ fontSize: size - 2 }}>?</span>;
   return <Icon style={{ width: size, height: size }} />;
 }

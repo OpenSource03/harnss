@@ -26,13 +26,13 @@ const CURATED_EMOJIS = [
   "🎭", "🎬", "📡", "🧬", "🔒", "🏴‍☠️", "🚩", "🏁",
 ];
 
-// Popular lucide icon names for quick access
+// Popular lucide icon names — must match PascalCase keys in the `icons` map
 const POPULAR_ICONS = [
-  "layers", "rocket", "code", "terminal", "globe", "heart", "star", "zap",
-  "shield", "target", "compass", "flame", "gem", "crown", "coffee", "music",
-  "camera", "book", "briefcase", "cpu", "database", "feather", "gift", "home",
-  "key", "lamp", "map", "palette", "pen-tool", "puzzle", "scissors", "settings",
-  "sparkles", "sun", "umbrella", "wand", "wrench", "box", "cloud", "flag",
+  "Layers", "Rocket", "Code", "Terminal", "Globe", "Heart", "Star", "Zap",
+  "Shield", "Target", "Compass", "Flame", "Gem", "Crown", "Coffee", "Music",
+  "Camera", "Book", "Briefcase", "Cpu", "Database", "Feather", "Gift", "Home",
+  "Key", "Lamp", "Map", "Palette", "PenTool", "Puzzle", "Scissors", "Settings",
+  "Sparkles", "Sun", "Umbrella", "Wand", "Wrench", "Box", "Cloud", "Flag",
 ];
 
 interface IconPickerProps {
@@ -95,7 +95,7 @@ export function IconPicker({ value, iconType, onChange }: IconPickerProps) {
                   onClick={() => onChange(name, "lucide")}
                   title={name}
                   className={`flex h-8 w-8 items-center justify-center rounded hover:bg-accent ${
-                    value === name && iconType === "lucide" ? "bg-accent ring-1 ring-ring" : ""
+                    iconType === "lucide" && value.toLowerCase() === name.toLowerCase() ? "bg-accent ring-1 ring-ring" : ""
                   }`}
                 >
                   <Icon className="h-4 w-4" />

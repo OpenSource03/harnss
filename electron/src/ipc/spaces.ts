@@ -17,7 +17,7 @@ interface Space {
 const DEFAULT_SPACE: Space = {
   id: "default",
   name: "General",
-  icon: "layers",
+  icon: "Layers",
   iconType: "lucide",
   color: { hue: 0, chroma: 0 },
   createdAt: Date.now(),

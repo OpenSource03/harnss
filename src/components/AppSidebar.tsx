@@ -12,8 +12,8 @@ import {
   Loader2,
   History,
   ArrowRightLeft,
-  icons,
 } from "lucide-react";
+import { resolveLucideIcon } from "@/lib/icon-utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -421,7 +421,7 @@ function ProjectSection({
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="w-44">
                   {otherSpaces.map((s) => {
-                    const SpIcon = s.iconType === "lucide" ? icons[s.icon as keyof typeof icons] : null;
+                    const SpIcon = s.iconType === "lucide" ? resolveLucideIcon(s.icon) : null;
                     return (
                       <DropdownMenuItem
                         key={s.id}

@@ -9,7 +9,7 @@ export interface SpaceColor {
 export interface Space {
   id: string;
   name: string;
-  icon: string;              // Emoji ("🚀") or lucide name ("rocket")
+  icon: string;              // Emoji ("🚀") or lucide PascalCase name ("Rocket")
   iconType: "emoji" | "lucide";
   color: SpaceColor;
   createdAt: number;
