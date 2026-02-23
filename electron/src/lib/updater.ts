@@ -5,6 +5,9 @@ import { log } from "./logger";
 import { getAppSetting } from "./app-settings";
 import { onSettingsChanged } from "../ipc/settings";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessing internal MacUpdater state for diagnostics
+type MacUpdaterInternal = { squirrelDownloadedUpdate?: boolean };
+
 // Flag to prevent window-all-closed from calling app.quit() while quitAndInstall() is
 // managing the quit lifecycle (Squirrel.Mac needs control of the process on macOS).
 let installingUpdate = false;
@@ -74,8 +77,30 @@ export function initAutoUpdater(
   // IPC handlers for renderer
   ipcMain.handle("updater:download", () => autoUpdater.downloadUpdate());
   ipcMain.handle("updater:install", () => {
+    const squirrelReady = (autoUpdater as unknown as MacUpdaterInternal).squirrelDownloadedUpdate;
+    log("UPDATER", `Install requested (squirrelReady=${squirrelReady})`);
+
+    if (!squirrelReady) {
+      // Squirrel.Mac hasn't fetched the update yet (e.g. code signing mismatch).
+      // Don't close windows — report the failure so the user isn't left stranded.
+      log("UPDATER_ERR", "Cannot install: Squirrel has not finished downloading the update");
+      const win = getMainWindow();
+      win?.webContents.send("updater:install-error", {
+        message: "Update failed to verify. Try downloading the latest version manually.",
+      });
+      return;
+    }
+
     installingUpdate = true;
-    autoUpdater.quitAndInstall();
+    // Force-close all windows so Squirrel.Mac has clean control of the quit lifecycle.
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.destroy(); // destroy() skips beforeunload/close events — immediate teardown
+    }
+    // Defer to next tick so window destruction propagates before Squirrel takes over
+    setImmediate(() => {
+      log("UPDATER", "Calling quitAndInstall()");
+      autoUpdater.quitAndInstall();
+    });
   });
   ipcMain.handle("updater:check", () => autoUpdater.checkForUpdates());
   ipcMain.handle("updater:current-version", () => app.getVersion());

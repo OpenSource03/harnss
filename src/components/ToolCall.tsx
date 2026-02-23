@@ -18,6 +18,7 @@ import {
   ChevronsUpDown,
   Lightbulb,
   Map,
+  MessageCircleQuestion,
 } from "lucide-react";
 import {
   Collapsible,
@@ -68,6 +69,7 @@ const TOOL_ICONS: Record<string, typeof Terminal> = {
   TodoWrite: ListChecks,
   EnterPlanMode: Lightbulb,
   ExitPlanMode: Map,
+  AskUserQuestion: MessageCircleQuestion,
 };
 
 function getToolIcon(toolName: string) {
@@ -86,6 +88,7 @@ const TOOL_PAST: Record<string, string> = {
   TodoWrite: "Updated tasks",
   EnterPlanMode: "Entered plan mode",
   ExitPlanMode: "Presented plan",
+  AskUserQuestion: "Asked",
 };
 
 const TOOL_ACTIVE: Record<string, string> = {
@@ -100,6 +103,7 @@ const TOOL_ACTIVE: Record<string, string> = {
   TodoWrite: "Updating tasks",
   EnterPlanMode: "Entering plan mode",
   ExitPlanMode: "Preparing plan",
+  AskUserQuestion: "Asking",
 };
 
 // MCP tool friendly names — pattern-matched for different server name prefixes
@@ -170,7 +174,7 @@ export const ToolCall = memo(function ToolCall({ message }: { message: UIMessage
 // ── Regular tool (Read, Write, Edit, Bash, Grep, Glob, etc.) ──
 
 function RegularTool({ message }: { message: UIMessage }) {
-  const isEditLike = message.toolName === "Edit" || message.toolName === "Write" || message.toolName === "ExitPlanMode";
+  const isEditLike = message.toolName === "Edit" || message.toolName === "Write" || message.toolName === "ExitPlanMode" || message.toolName === "AskUserQuestion";
   const [expanded, setExpanded] = useState(isEditLike);
   const hasResult = !!message.toolResult;
   const isRunning = !hasResult;
@@ -181,7 +185,6 @@ function RegularTool({ message }: { message: UIMessage }) {
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
       <CollapsibleTrigger className="group relative flex w-full items-center gap-2 py-1 text-[13px] hover:text-foreground transition-colors cursor-pointer overflow-hidden">
-        {isRunning && <div className="tool-shimmer" />}
 
         <div className="relative flex items-center gap-2 min-w-0">
           {isRunning && (
@@ -194,7 +197,12 @@ function RegularTool({ message }: { message: UIMessage }) {
           ) : (
             <Icon className="h-3.5 w-3.5 shrink-0 text-foreground/35" />
           )}
-          <span className={`shrink-0 whitespace-nowrap font-medium ${isError ? "text-red-400/70" : "text-foreground/75"}`}>
+          <span
+            className={`shrink-0 whitespace-nowrap font-medium ${isError ? "text-red-400/70" : isRunning ? "tool-wave-text" : "text-foreground/75"}`}
+            data-wave-text={isRunning
+              ? (TOOL_ACTIVE[message.toolName ?? ""] ?? getMcpToolLabel(message.toolName ?? "", "active") ?? message.toolName)
+              : undefined}
+          >
             {isRunning
               ? (TOOL_ACTIVE[message.toolName ?? ""] ?? getMcpToolLabel(message.toolName ?? "", "active") ?? message.toolName)
               : isError
@@ -247,6 +255,8 @@ function ExpandedToolContent({ message }: { message: UIMessage }) {
       return <WebSearchContent message={message} />;
     case "WebFetch":
       return <WebFetchContent message={message} />;
+    case "AskUserQuestion":
+      return <AskUserQuestionContent message={message} />;
     default:
       // Check for specialized MCP tool renderers
       if (message.toolName && hasMcpRenderer(message.toolName)) {
@@ -543,7 +553,6 @@ function TaskTool({ message }: { message: UIMessage }) {
         <CollapsibleTrigger className={`group relative flex w-full items-center gap-2 text-[13px] hover:text-foreground transition-colors cursor-pointer overflow-hidden ${
           showCard ? "px-3 py-1.5" : "py-1"
         }`}>
-          {isRunning && <div className="tool-shimmer" />}
 
           <div className="relative flex items-center gap-2 min-w-0 flex-1">
             {isRunning && (
@@ -565,7 +574,10 @@ function TaskTool({ message }: { message: UIMessage }) {
                 <span className="truncate text-foreground/40">{formatTaskSummary(message)}</span>
               </>
             ) : (
-              <span className="font-medium text-foreground/75 truncate">
+              <span
+                className={`font-medium truncate ${isRunning ? "tool-wave-text" : "text-foreground/75"}`}
+                data-wave-text={isRunning ? formatTaskRunningTitle(message) : undefined}
+              >
                 {isRunning ? formatTaskRunningTitle(message) : formatTaskTitle(message)}
               </span>
             )}
@@ -704,7 +716,10 @@ function SubagentStepRow({ step }: { step: SubagentToolStep }) {
         ) : (
           <Icon className="h-3 w-3 shrink-0 text-foreground/35" />
         )}
-        <span className={isError ? "text-red-400/70" : "text-foreground/75"}>
+        <span
+          className={isError ? "text-red-400/70" : !hasResult ? "tool-wave-text" : "text-foreground/75"}
+          data-wave-text={!hasResult && !isError ? (TOOL_ACTIVE[step.toolName] ?? step.toolName) : undefined}
+        >
           {hasResult
             ? isError
               ? `Failed to ${(TOOL_ACTIVE[step.toolName] ?? step.toolName).toLowerCase()}`
@@ -847,6 +862,48 @@ function ExitPlanModeContent({ message }: { message: UIMessage }) {
   );
 }
 
+// ── AskUserQuestion: shows only the question text (answers handled in PermissionPrompt) ──
+
+interface AskQuestionOption {
+  label: string;
+  description: string;
+}
+
+interface AskQuestionItem {
+  question: string;
+  header: string;
+  options: AskQuestionOption[];
+  multiSelect: boolean;
+}
+
+function AskUserQuestionContent({ message }: { message: UIMessage }) {
+  const questions = (message.toolInput?.questions ?? []) as AskQuestionItem[];
+  const hasResult = !!message.toolResult;
+
+  return (
+    <div className="space-y-2 text-xs">
+      {questions.map((q, qi) => (
+        <div
+          key={q.question}
+          className={qi > 0 ? "border-t border-border/40 pt-2" : ""}
+        >
+          <span className="text-[13px] text-foreground/80 leading-snug">
+            {q.question}
+          </span>
+
+          {/* Waiting state when tool hasn't returned yet */}
+          {!hasResult && (
+            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-foreground/30 italic">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Waiting for answer…
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Formatting helpers ──
 
 function formatTaskTitle(message: UIMessage): string {
@@ -892,6 +949,15 @@ function formatCompactSummary(message: UIMessage): string {
     return titleMatch?.[1] ?? "implementation plan";
   }
   if (toolName === "EnterPlanMode") return "";
+
+  // AskUserQuestion — show the full question text as compact summary
+  if (toolName === "AskUserQuestion") {
+    const questions = input.questions as Array<{ question: string; header: string }> | undefined;
+    if (questions && questions.length > 0) {
+      return questions[0].question;
+    }
+    return "";
+  }
 
   // MCP tools (mcp__Server__tool) or ACP tools (Tool: Server/tool) — delegate to specialized summaries
   if (toolName.startsWith("mcp__") || toolName.startsWith("Tool: ")) {

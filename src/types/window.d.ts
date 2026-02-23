@@ -192,10 +192,19 @@ declare global {
         get: () => Promise<AppSettings>;
         set: (patch: Partial<AppSettings>) => Promise<{ ok?: boolean; error?: string }>;
       };
+      speech: {
+        /** Triggers macOS native dictation (Cocoa startDictation: selector). Returns { ok: false } on non-macOS. */
+        startNativeDictation: () => Promise<{ ok: boolean; reason?: string }>;
+        /** Returns the OS platform string (darwin, win32, linux) */
+        getPlatform: () => Promise<string>;
+        /** Requests microphone permission (macOS system dialog). Returns { granted } on all platforms. */
+        requestMicPermission: () => Promise<{ granted: boolean }>;
+      };
       updater: {
         onUpdateAvailable: (cb: (info: { version: string; releaseNotes?: string }) => void) => () => void;
         onDownloadProgress: (cb: (progress: { percent: number; bytesPerSecond: number; total: number; transferred: number }) => void) => () => void;
         onUpdateDownloaded: (cb: (info: { version: string }) => void) => () => void;
+        onInstallError: (cb: (error: { message: string }) => void) => () => void;
         download: () => Promise<unknown>;
         install: () => Promise<void>;
         check: () => Promise<unknown>;

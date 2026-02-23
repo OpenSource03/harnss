@@ -16,6 +16,19 @@ export function ToolsPanel({ cwd }: ToolsPanelProps) {
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
+  // Track tabs in ref so the unmount cleanup always sees the latest list
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+
+  // Destroy all PTY processes when the panel unmounts (e.g., session deselected)
+  useEffect(() => {
+    return () => {
+      for (const tab of tabsRef.current) {
+        window.claude.terminal.destroy(tab.terminalId);
+      }
+    };
+  }, []);
+
   const createTerminal = useCallback(async () => {
     const result = await window.claude.terminal.create({
       cwd: cwd || undefined,

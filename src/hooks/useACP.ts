@@ -351,6 +351,14 @@ export function useACP({ sessionId, initialMessages, initialConfigOptions, initi
     await window.claude.acp.prompt(sessionId, text, images);
   }, [sessionId]);
 
+  /** Send a message without adding it to chat (used for queued messages already in the UI) */
+  const sendRaw = useCallback(async (text: string, images?: ImageAttachment[]) => {
+    if (!sessionId) return;
+    acpLog("SEND_RAW", { session: sessionId.slice(0, 8), textLen: text.length });
+    setIsProcessing(true);
+    await window.claude.acp.prompt(sessionId, text, images);
+  }, [sessionId]);
+
   const stop = useCallback(async () => {
     if (!sessionId) return;
     acpLog("STOP", { session: sessionId.slice(0, 8) });
@@ -409,7 +417,7 @@ export function useACP({ sessionId, initialMessages, initialConfigOptions, initi
     totalCost, setTotalCost,
     contextUsage,
     isCompacting,
-    send, stop, interrupt, compact,
+    send, sendRaw, stop, interrupt, compact,
     pendingPermission, respondPermission,
     setPermissionMode,
     configOptions, setConfigOptions, setConfig,

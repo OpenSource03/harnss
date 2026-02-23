@@ -170,6 +170,11 @@ contextBridge.exposeInMainWorld("claude", {
     get: () => ipcRenderer.invoke("settings:get"),
     set: (patch: Record<string, unknown>) => ipcRenderer.invoke("settings:set", patch),
   },
+  speech: {
+    startNativeDictation: () => ipcRenderer.invoke("speech:start-native-dictation"),
+    getPlatform: () => ipcRenderer.invoke("speech:get-platform"),
+    requestMicPermission: () => ipcRenderer.invoke("speech:request-mic-permission"),
+  },
   updater: {
     onUpdateAvailable: (cb: (info: unknown) => void) => {
       const listener = (_event: IpcRendererEvent, info: unknown) => cb(info);
@@ -185,6 +190,11 @@ contextBridge.exposeInMainWorld("claude", {
       const listener = (_event: IpcRendererEvent, info: unknown) => cb(info);
       ipcRenderer.on("updater:update-downloaded", listener);
       return () => ipcRenderer.removeListener("updater:update-downloaded", listener);
+    },
+    onInstallError: (cb: (error: { message: string }) => void) => {
+      const listener = (_event: IpcRendererEvent, error: { message: string }) => cb(error);
+      ipcRenderer.on("updater:install-error", listener);
+      return () => ipcRenderer.removeListener("updater:install-error", listener);
     },
     download: () => ipcRenderer.invoke("updater:download"),
     install: () => ipcRenderer.invoke("updater:install"),

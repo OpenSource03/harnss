@@ -12,12 +12,31 @@ interface ThinkingBlockProps {
   thinkingComplete?: boolean;
 }
 
+interface AnimatedChunk {
+  id: number;
+  text: string;
+}
+
+function commonPrefixLength(a: string, b: string): number {
+  const max = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < max && a.charCodeAt(i) === b.charCodeAt(i)) i += 1;
+  return i;
+}
+
 export function ThinkingBlock({ thinking, isStreaming, thinkingComplete }: ThinkingBlockProps) {
   const [open, setOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   // Tracks whether user manually scrolled up in the inner thinking div
   const userScrolledRef = useRef(false);
   const isThinking = isStreaming && !thinkingComplete && thinking.length > 0;
+
+  // Render thinking as stable prefix + appended animated chunks.
+  // This keeps earlier chunk animations running even when new chunks arrive.
+  const prevThinkingRef = useRef(thinking);
+  const nextChunkIdRef = useRef(0);
+  const [baseText, setBaseText] = useState(thinking);
+  const [animatedChunks, setAnimatedChunks] = useState<AnimatedChunk[]>([]);
 
   const handleScroll = useCallback(() => {
     const el = contentRef.current;
@@ -35,6 +54,48 @@ export function ThinkingBlock({ thinking, isStreaming, thinkingComplete }: Think
       el.scrollTop = el.scrollHeight;
     }
   }, [thinking, open]);
+
+  useEffect(() => {
+    const prev = prevThinkingRef.current;
+    const curr = thinking;
+    prevThinkingRef.current = curr;
+
+    if (!isThinking) {
+      setBaseText(curr);
+      setAnimatedChunks([]);
+      return;
+    }
+
+    if (!prev || !curr) {
+      setBaseText(curr);
+      setAnimatedChunks([]);
+      return;
+    }
+
+    const prefixLen = commonPrefixLength(prev, curr);
+    const appendedLen = curr.length - prefixLen;
+    if (appendedLen <= 0) {
+      setBaseText(curr);
+      setAnimatedChunks([]);
+      return;
+    }
+
+    // If upstream rewrites existing text, reset to avoid animating old regions.
+    const changedInMiddle = prefixLen < prev.length;
+    if (changedInMiddle) {
+      setBaseText(curr);
+      setAnimatedChunks([]);
+      return;
+    }
+
+    const appended = curr.slice(prev.length);
+    if (!appended) return;
+
+    setAnimatedChunks((chunks) => [
+      ...chunks,
+      { id: nextChunkIdRef.current++, text: appended },
+    ]);
+  }, [thinking, isThinking]);
 
   const handleOpenChange = useCallback((isOpen: boolean) => {
     setOpen(isOpen);
@@ -66,7 +127,10 @@ export function ThinkingBlock({ thinking, isStreaming, thinkingComplete }: Think
           onScroll={handleScroll}
           className="mt-1 max-h-60 overflow-auto border-s-2 border-foreground/10 ps-3 py-1 text-xs text-foreground/40 whitespace-pre-wrap"
         >
-          {thinking}
+          {baseText}
+          {animatedChunks.map((chunk) => (
+            <span key={chunk.id} className="stream-chunk-enter">{chunk.text}</span>
+          ))}
         </div>
       </CollapsibleContent>
     </Collapsible>

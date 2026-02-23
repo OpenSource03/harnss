@@ -9,7 +9,7 @@ interface SessionMeta {
   projectId: string;
   title: string;
   createdAt: number;
-  /** Timestamp of the most recent message — used for sidebar sort order */
+  /** Timestamp of the most recent user message — used for sidebar sort order */
   lastMessageAt: number;
   model?: string;
   totalCost?: number;
@@ -33,17 +33,29 @@ interface SearchResult {
   }>;
 }
 
+function getLastUserMessageTimestamp(messages?: Array<{ role?: string; timestamp?: number }>): number | undefined {
+  if (!Array.isArray(messages) || messages.length === 0) return undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === "user" && typeof msg.timestamp === "number") return msg.timestamp;
+  }
+  return undefined;
+}
+
 export function register(): void {
-  ipcMain.handle("sessions:save", (_event, data: { projectId: string; id: string; createdAt?: number; messages?: Array<{ timestamp?: number }> }) => {
+  ipcMain.handle("sessions:save", (_event, data: { projectId: string; id: string; createdAt?: number; messages?: Array<{ role?: string; timestamp?: number }> }) => {
     try {
       const filePath = getSessionFilePath(data.projectId, data.id);
-      // Compute lastMessageAt from messages so sessions:list can sort by latest activity
-      let lastMessageAt = (data as Record<string, unknown>).lastMessageAt as number | undefined;
-      if (!lastMessageAt && Array.isArray(data.messages) && data.messages.length > 0) {
-        const lastMsg = data.messages[data.messages.length - 1];
-        lastMessageAt = lastMsg?.timestamp || data.createdAt || 0;
-      }
-      const enriched = { ...data, lastMessageAt: lastMessageAt || data.createdAt || 0 };
+      const providedLastMessageAt = (data as Record<string, unknown>).lastMessageAt;
+      const normalizedProvidedLastMessageAt =
+        typeof providedLastMessageAt === "number" ? providedLastMessageAt : undefined;
+      // Always prefer the latest user message timestamp when messages are present.
+      const lastMessageAt =
+        getLastUserMessageTimestamp(data.messages) ??
+        normalizedProvidedLastMessageAt ??
+        data.createdAt ??
+        0;
+      const enriched = { ...data, lastMessageAt };
       fs.writeFileSync(filePath, JSON.stringify(enriched, null, 2), "utf-8");
       return { ok: true };
     } catch (err) {
@@ -72,13 +84,12 @@ export function register(): void {
         try {
           const raw = fs.readFileSync(path.join(dir, file), "utf-8");
           const data = JSON.parse(raw);
-          // Derive lastMessageAt: stored field → last message timestamp → createdAt
-          let lastMessageAt: number = data.lastMessageAt || 0;
-          if (!lastMessageAt && Array.isArray(data.messages) && data.messages.length > 0) {
-            const lastMsg = data.messages[data.messages.length - 1];
-            lastMessageAt = lastMsg?.timestamp || 0;
-          }
-          if (!lastMessageAt) lastMessageAt = data.createdAt || 0;
+          // Derive lastMessageAt: latest user message timestamp → stored field → createdAt
+          const lastMessageAt: number =
+            getLastUserMessageTimestamp(data.messages) ??
+            (typeof data.lastMessageAt === "number" ? data.lastMessageAt : undefined) ??
+            data.createdAt ??
+            0;
 
           list.push({
             id: data.id,
@@ -94,7 +105,7 @@ export function register(): void {
           // Skip corrupted files
         }
       }
-      // Sort by most recent activity (latest message), not creation time
+      // Sort by most recent user activity, not creation time.
       list.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
       return list;
     } catch (err) {

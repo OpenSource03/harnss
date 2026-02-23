@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import type { ChatSession, UIMessage, PersistedSession, Project, ClaudeEvent, SystemInitEvent, SessionInfo, PermissionRequest, ImageAttachment, McpServerStatus, McpServerConfig, ModelInfo, AcpPermissionBehavior } from "../types";
 import { toMcpStatusState } from "../types/ui";
-import type { ACPSessionEvent, ACPPermissionEvent, ACPConfigOption } from "../types/acp";
+import type { ACPSessionEvent, ACPPermissionEvent, ACPTurnCompleteEvent, ACPConfigOption } from "../types/acp";
 import { normalizeToolInput as acpNormalizeToolInput, pickAutoResponseOption } from "../lib/acp-adapter";
 import { useClaude } from "./useClaude";
 import { useACP } from "./useACP";
@@ -95,6 +95,17 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
   const switchSessionRef = useRef<(id: string) => Promise<void>>(undefined);
 
   const backgroundStoreRef = useRef(new BackgroundSessionStore());
+
+  // ── Message queue: buffer user messages while the engine is processing ──
+  interface QueuedMessage {
+    text: string;
+    images?: ImageAttachment[];
+    displayText?: string;
+    /** ID of the UIMessage already shown in chat with isQueued: true */
+    messageId: string;
+  }
+  const messageQueueRef = useRef<QueuedMessage[]>([]);
+  const [queuedCount, setQueuedCount] = useState(0);
 
   // Wire up background store callbacks for sidebar indicators
   useEffect(() => {
@@ -401,7 +412,15 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
       );
     });
 
-    return () => { unsub(); unsubAcp(); unsubBgPerm(); unsubBgAcpPerm(); };
+    // Route turn-complete for non-active ACP sessions to the background store
+    // (clears isProcessing so the session doesn't appear stuck when switching back)
+    const unsubBgAcpTurn = window.claude.acp.onTurnComplete((data: ACPTurnCompleteEvent) => {
+      const sid = data._sessionId;
+      if (!sid || sid === activeSessionIdRef.current) return;
+      backgroundStoreRef.current.handleACPTurnComplete(sid);
+    });
+
+    return () => { unsub(); unsubAcp(); unsubBgPerm(); unsubBgAcpPerm(); unsubBgAcpTurn(); };
   }, []);
 
   // Load sessions for ALL projects
@@ -488,12 +507,14 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     saveTimerRef.current = setTimeout(() => {
       const session = sessionsRef.current.find((s) => s.id === activeSessionId);
       if (!session) return;
+      // Strip isQueued from messages before persisting — queue state is runtime-only
+      const msgs = messagesRef.current.map((m) => (m.isQueued ? { ...m, isQueued: undefined } : m));
       const data: PersistedSession = {
         id: activeSessionId,
         projectId: session.projectId,
         title: session.title,
         createdAt: session.createdAt,
-        messages: messagesRef.current,
+        messages: msgs,
         model: session.model || sessionInfo?.model,
         totalCost: totalCostRef.current,
         engine: session.engine,
@@ -526,11 +547,16 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     );
   }, [activeSessionId, totalCost]);
 
-  // Keep lastMessageAt in sync so the sidebar sorts by most recent activity
+  // Keep lastMessageAt in sync so the sidebar sorts by most recent user activity
   useEffect(() => {
     if (!activeSessionId || activeSessionId === DRAFT_ID || messages.length === 0) return;
-    const lastMsg = messages[messages.length - 1];
-    const lastMessageAt = lastMsg?.timestamp || Date.now();
+    // Only user messages should affect sort order — AI responses shouldn't bump a chat to the top
+    let lastUserMsg: UIMessage | undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") { lastUserMsg = messages[i]; break; }
+    }
+    if (!lastUserMsg) return;
+    const lastMessageAt = lastUserMsg.timestamp || Date.now();
     setSessions((prev) =>
       prev.map((s) =>
         s.id === activeSessionId ? { ...s, lastMessageAt } : s,
@@ -560,17 +586,66 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     }
   }, [activeSessionId, engine.pendingPermission]);
 
+  // Drain one queued message when the current turn completes.
+  // Uses engine-specific setMessages (not `engine.setMessages`) to avoid stale closure
+  // if the active engine reference changes between renders.
+  useEffect(() => {
+    if (engine.isProcessing) return;
+    if (messageQueueRef.current.length === 0) return;
+    const activeId = activeSessionIdRef.current;
+    if (!activeId || activeId === DRAFT_ID) return;
+    if (!liveSessionIdsRef.current.has(activeId)) return;
+
+    const next = messageQueueRef.current.shift()!;
+    setQueuedCount(messageQueueRef.current.length);
+
+    const sessionEngine = sessionsRef.current.find((s) => s.id === activeId)?.engine ?? "claude";
+    // Pick the correct engine's setMessages to avoid stale closure
+    const targetSetMessages = sessionEngine === "acp" ? acp.setMessages : claude.setMessages;
+
+    // Clear isQueued flag on the message already in chat
+    targetSetMessages((prev) =>
+      prev.map((m) => (m.id === next.messageId ? { ...m, isQueued: false } : m)),
+    );
+
+    /** Show error + clear remaining queue on send failure */
+    const handleSendError = () => {
+      targetSetMessages((prev) => [
+        ...prev,
+        {
+          id: `system-send-error-${Date.now()}`,
+          role: "system" as const,
+          content: "Failed to send queued message.",
+          isError: true,
+          timestamp: Date.now(),
+        },
+      ]);
+      clearQueue();
+    };
+
+    if (sessionEngine === "acp") {
+      acp.sendRaw(next.text, next.images).catch(handleSendError);
+    } else {
+      claude.sendRaw(next.text, next.images).then((ok) => {
+        if (!ok) handleSendError();
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine.isProcessing]);
+
   const saveCurrentSession = useCallback(async () => {
     const id = activeSessionIdRef.current;
     if (!id || id === DRAFT_ID || messagesRef.current.length === 0) return;
     const session = sessionsRef.current.find((s) => s.id === id);
     if (!session) return;
+    // Strip isQueued from messages before persisting — queue state is runtime-only
+    const msgs = messagesRef.current.map((m) => (m.isQueued ? { ...m, isQueued: undefined } : m));
     const data: PersistedSession = {
       id,
       projectId: session.projectId,
       title: session.title,
       createdAt: session.createdAt,
-      messages: messagesRef.current,
+      messages: msgs,
       model: session.model,
       totalCost: totalCostRef.current,
       engine: session.engine,
@@ -596,9 +671,39 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     }
   }, []);
 
+  /** Add a message to the queue and show it in chat immediately with isQueued styling */
+  const enqueueMessage = useCallback((text: string, images?: ImageAttachment[], displayText?: string) => {
+    const msgId = `user-queued-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    messageQueueRef.current.push({ text, images, displayText, messageId: msgId });
+    setQueuedCount(messageQueueRef.current.length);
+    engine.setMessages((prev) => [
+      ...prev,
+      {
+        id: msgId,
+        role: "user" as const,
+        content: text,
+        timestamp: Date.now(),
+        isQueued: true,
+        ...(images?.length ? { images } : {}),
+        ...(displayText ? { displayContent: displayText } : {}),
+      },
+    ]);
+  }, [engine.setMessages]);
+
+  /** Clear the entire queue and remove queued messages from chat */
+  const clearQueue = useCallback(() => {
+    const queuedIds = new Set(messageQueueRef.current.map((q) => q.messageId));
+    messageQueueRef.current = [];
+    setQueuedCount(0);
+    if (queuedIds.size > 0) {
+      engine.setMessages((prev) => prev.filter((m) => !queuedIds.has(m.id)));
+    }
+  }, [engine.setMessages]);
+
   // createSession now requires a projectId
   const createSession = useCallback(
     async (projectId: string, options?: StartOptions) => {
+      clearQueue();
       abandonEagerSession();
       acpAgentIdRef.current = null;
       acpAgentSessionIdRef.current = null;
@@ -637,7 +742,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
         probeMcpServers(projectId);
       }
     },
-    [saveCurrentSession, seedBackgroundStore, eagerStartSession, abandonEagerSession],
+    [saveCurrentSession, seedBackgroundStore, eagerStartSession, abandonEagerSession, clearQueue],
   );
 
   const materializingRef = useRef(false);
@@ -866,6 +971,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     async (id: string) => {
       if (id === activeSessionIdRef.current) return;
 
+      clearQueue();
       abandonEagerSession();
       acpAgentIdRef.current = null;
       acpAgentSessionIdRef.current = null;
@@ -928,7 +1034,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
         );
       }
     },
-    [saveCurrentSession, seedBackgroundStore, abandonEagerSession],
+    [saveCurrentSession, seedBackgroundStore, abandonEagerSession, clearQueue],
   );
 
   // Keep switchSessionRef in sync for stable toast callbacks
@@ -951,6 +1057,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
       toast.dismiss(`permission-${id}`);
       await window.claude.sessions.delete(session.projectId, id);
       if (activeSessionIdRef.current === id) {
+        clearQueue();
         setActiveSessionId(null);
         setInitialMessages([]);
         setInitialMeta(null);
@@ -959,7 +1066,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
       }
       setSessions((prev) => prev.filter((s) => s.id !== id));
     },
-    [],
+    [clearQueue],
   );
 
   const renameSession = useCallback((id: string, title: string) => {
@@ -1374,6 +1481,12 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
 
       if (!activeId) return;
 
+      // Queue check: if engine is processing, enqueue instead of sending directly
+      if (isProcessingRef.current && liveSessionIdsRef.current.has(activeId)) {
+        enqueueMessage(text, images, displayText);
+        return;
+      }
+
       // Check engine of the active session
       const activeSessionEngine = sessionsRef.current.find(s => s.id === activeId)?.engine ?? "claude";
 
@@ -1400,10 +1513,11 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
         return;
       }
     },
-    [claude.send, claude.setMessages, acp.send, acp.setMessages, acp.setIsProcessing, engine.setMessages, materializeDraft, reviveSession],
+    [claude.send, claude.setMessages, acp.send, acp.setMessages, acp.setIsProcessing, engine.setMessages, materializeDraft, reviveSession, enqueueMessage],
   );
 
   const deselectSession = useCallback(async () => {
+    clearQueue();
     abandonEagerSession();
     await saveCurrentSession();
     seedBackgroundStore();
@@ -1415,7 +1529,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     setInitialRawAcpPermission(null);
     // Filter out any leftover DRAFT_ID placeholder from a pending ACP start
     setSessions((prev) => prev.filter(s => s.id !== DRAFT_ID).map((s) => ({ ...s, isActive: false })));
-  }, [saveCurrentSession, seedBackgroundStore, abandonEagerSession]);
+  }, [saveCurrentSession, seedBackgroundStore, abandonEagerSession, clearQueue]);
 
   const isDraft = activeSessionId === DRAFT_ID;
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
@@ -1548,8 +1662,11 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     sessionInfo: engine.sessionInfo,
     totalCost: engine.totalCost,
     send,
+    queuedCount,
     stop: engine.stop,
     interrupt: async () => {
+      // Clear queued messages before interrupting
+      clearQueue();
       // During ACP startup (DRAFT + processing), abort the pending start process
       if (activeSessionIdRef.current === DRAFT_ID
           && startOptionsRef.current.engine === "acp"

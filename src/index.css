@@ -218,38 +218,40 @@ html.platform-win32 .drag-region {
   padding-inline-start: 8px !important;
 }
 
-/* ── Tool Call: Ghost Pulse shimmer ── */
-@keyframes tool-shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(200%);
-  }
+/* ── Tool Call: Text-only wave ── */
+@keyframes tool-text-wave {
+  0% { background-position: 180% 50%; }
+  100% { background-position: -80% 50%; }
 }
 
-.tool-shimmer {
+.tool-wave-text {
+  position: relative;
+  display: inline-block;
+  color: color-mix(in oklch, var(--foreground) 70%, transparent);
+}
+
+.tool-wave-text::after {
+  content: attr(data-wave-text);
   position: absolute;
   inset: 0;
-  overflow: hidden;
   pointer-events: none;
-  border-radius: inherit;
-}
-
-.tool-shimmer::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  width: 50%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    oklch(0.985 0 0 / 0.05) 20%,
-    oklch(0.985 0 0 / 0.1) 50%,
-    oklch(0.985 0 0 / 0.05) 80%,
-    transparent 100%
+  color: transparent;
+  background-image: linear-gradient(
+    115deg,
+    color-mix(in oklch, var(--foreground) 24%, transparent) 0%,
+    color-mix(in oklch, var(--foreground) 100%, transparent) 22%,
+    color-mix(in oklch, var(--foreground) 30%, transparent) 42%,
+    color-mix(in oklch, var(--foreground) 100%, transparent) 62%,
+    color-mix(in oklch, var(--foreground) 26%, transparent) 82%,
+    color-mix(in oklch, var(--foreground) 96%, transparent) 100%
   );
-  animation: tool-shimmer 2.4s ease-in-out infinite;
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  opacity: 0.92;
+  animation: tool-text-wave 1.85s linear infinite;
 }
 
 /* ── Search result highlight flash ── */
@@ -261,6 +263,16 @@ html.platform-win32 .drag-region {
 .search-highlight {
   animation: search-flash 1.5s ease-out;
   border-radius: var(--radius);
+}
+
+/* ── Voice dictation recording pulse ── */
+@keyframes recording-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.recording-pulse {
+  animation: recording-pulse 1.5s ease-in-out infinite;
 }
 
 /* Disable Tailwind Typography backtick pseudo-elements on code —
@@ -286,6 +298,21 @@ html.platform-win32 .drag-region {
 .space-slide-from-left {
   animation: slide-from-left 0.2s ease-out;
 }
+
+/* ── Streaming text: per-chunk tail fade-in (applied via DOM wrapper spans) ── */
+@keyframes stream-chunk-enter {
+  from {
+    opacity: 0.15;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.stream-chunk-enter {
+  animation: stream-chunk-enter 0.32s ease-out both;
+}
+
 
 /* Defensive scrollbar hiding for overflow containers (InputBar toolbar fallback) */
 .scrollbar-none::-webkit-scrollbar { display: none; }

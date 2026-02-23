@@ -39,6 +39,7 @@ interface AppSettings {
   allowPrereleaseUpdates: boolean;
   defaultChatLimit: number;
   preferredEditor: "auto" | "cursor" | "code" | "zed";
+  voiceDictation: "native" | "whisper";
 }
 
 // ── Props ──

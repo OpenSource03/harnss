@@ -14,6 +14,27 @@ async function getACP() {
   return _acp;
 }
 
+/** Extract a user-friendly error message from Error objects or unknown values */
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === "object" && err !== null) {
+    // Handle structured errors from ACP SDK (e.g., { message, code, details })
+    const obj = err as Record<string, unknown>;
+    if (obj.message && typeof obj.message === "string") {
+      return obj.message;
+    }
+    // Fallback: JSON stringify structured errors
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
+}
+
 interface ACPSessionEntry {
   process: ChildProcess;
   connection: unknown; // ClientSideConnection — typed as unknown to avoid top-level ESM import
@@ -580,8 +601,8 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
 
       return { ok: true };
     } catch (err) {
-      log("ACP_SEND", `ERROR: session=${sessionId.slice(0, 8)} ${String(err)}`);
-      return { error: String(err) };
+      log("ACP_SEND", `ERROR: session=${sessionId.slice(0, 8)} ${errorMessage(err)}`);
+      return { error: errorMessage(err) };
     }
   });
 
@@ -709,7 +730,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
       await conn.cancel({ sessionId: session.acpSessionId });
       log("ACP_CANCEL", `session=${sessionId.slice(0, 8)} acknowledged`);
     } catch (err) {
-      log("ACP_CANCEL", `ERROR: session=${sessionId.slice(0, 8)} ${String(err)}`);
+      log("ACP_CANCEL", `ERROR: session=${sessionId.slice(0, 8)} ${errorMessage(err)}`);
     }
     return { ok: true };
   });
@@ -759,8 +780,8 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
         throw configErr;
       }
     } catch (err) {
-      log("ACP_CONFIG", `ERROR: session=${sessionId.slice(0, 8)} ${String(err)}`);
-      return { error: String(err) };
+      log("ACP_CONFIG", `ERROR: session=${sessionId.slice(0, 8)} ${errorMessage(err)}`);
+      return { error: errorMessage(err) };
     }
   });
 

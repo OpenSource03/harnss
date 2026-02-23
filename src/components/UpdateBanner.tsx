@@ -1,11 +1,12 @@
 import { memo, useCallback, useEffect, useState } from "react";
-import { ArrowDownToLine, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, RefreshCw, X } from "lucide-react";
 
 type UpdateState =
   | { phase: "idle" }
   | { phase: "available"; version: string }
   | { phase: "downloading"; percent: number }
-  | { phase: "ready"; version: string };
+  | { phase: "ready"; version: string }
+  | { phase: "error"; message: string };
 
 export const UpdateBanner = memo(function UpdateBanner() {
   const [state, setState] = useState<UpdateState>({ phase: "idle" });
@@ -30,6 +31,13 @@ export const UpdateBanner = memo(function UpdateBanner() {
     unsubs.push(
       window.claude.updater.onUpdateDownloaded((info) => {
         setState({ phase: "ready", version: info.version });
+      }),
+    );
+
+    unsubs.push(
+      window.claude.updater.onInstallError((error) => {
+        setState({ phase: "error", message: error.message });
+        setDismissed(false);
       }),
     );
 
@@ -105,6 +113,21 @@ export const UpdateBanner = memo(function UpdateBanner() {
               onClick={handleInstall}
             >
               Restart
+            </button>
+          </>
+        )}
+
+        {state.phase === "error" && (
+          <>
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-400" />
+            <div className="min-w-0 flex-1">
+              <span className="text-sidebar-foreground/70">{state.message}</span>
+            </div>
+            <button
+              className="shrink-0 text-sidebar-foreground/30 opacity-0 transition-opacity hover:text-sidebar-foreground/60 group-hover:opacity-100"
+              onClick={() => setDismissed(true)}
+            >
+              <X className="h-3 w-3" />
             </button>
           </>
         )}

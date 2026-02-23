@@ -347,7 +347,7 @@ export function AppLayout() {
     // Fall back to the most recent session in any project in this space
     const spaceSessions = manager.sessions
       .filter((s) => spaceProjectIds.has(s.projectId))
-      .sort((a, b) => b.createdAt - a.createdAt);
+      .sort((a, b) => (b.lastMessageAt ?? b.createdAt) - (a.lastMessageAt ?? a.createdAt));
 
     if (spaceSessions.length > 0) {
       manager.switchSession(spaceSessions[0].id);
@@ -551,6 +551,11 @@ export function AppLayout() {
 
     window.claude.setMinWidth(Math.max(minW, 600));
   }, [sidebar.isOpen, hasRightPanel, hasToolsColumn, manager.activeSessionId]);
+
+  // When tools column becomes visible, fire resize so xterm terminals re-fit
+  useEffect(() => {
+    if (hasToolsColumn) window.dispatchEvent(new Event("resize"));
+  }, [hasToolsColumn]);
 
   // ── Right panel resize ──
 
@@ -854,6 +859,7 @@ export function AppLayout() {
                 extraBottomPadding={!!manager.pendingPermission}
                 scrollToMessageId={scrollToMessageId}
                 onScrolledToMessage={() => setScrollToMessageId(undefined)}
+                sessionId={manager.activeSessionId}
                 onRevert={manager.isConnected && manager.revertFiles ? manager.revertFiles : undefined}
                 onFullRevert={manager.isConnected && manager.fullRevert ? manager.fullRevert : undefined}
                 onViewTurnChanges={handleViewTurnChanges}
@@ -870,6 +876,7 @@ export function AppLayout() {
                     onSend={handleSend}
                     onStop={handleStop}
                     isProcessing={manager.isProcessing}
+                    queuedCount={manager.queuedCount}
                     model={settings.model}
                     thinking={settings.thinking}
                     permissionMode={settings.permissionMode}
@@ -994,30 +1001,32 @@ export function AppLayout() {
           </>
         )}
 
-        {/* Tools panels — shown when toggled from picker, ordered by settings.toolOrder */}
-        {hasToolsColumn && (
+        {/* Tools panels — always mounted when session active to preserve terminal/browser state.
+            Column is hidden (display: none) when no panel tools are active, keeping processes alive. */}
+        {manager.activeSessionId && (
           <>
-            {/* Resize handle */}
-            <div
-              className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center"
-              onMouseDown={handleToolsResizeStart}
-            >
+            {/* Resize handle — only visible when tools column is showing */}
+            {hasToolsColumn && (
               <div
-                className={`h-10 w-0.5 rounded-full transition-colors duration-150 ${
-                  isResizing
-                    ? "bg-foreground/40"
-                    : "bg-transparent group-hover:bg-foreground/25"
-                }`}
-              />
-            </div>
+                className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center"
+                onMouseDown={handleToolsResizeStart}
+              >
+                <div
+                  className={`h-10 w-0.5 rounded-full transition-colors duration-150 ${
+                    isResizing
+                      ? "bg-foreground/40"
+                      : "bg-transparent group-hover:bg-foreground/25"
+                  }`}
+                />
+              </div>
+            )}
 
             <div
-              ref={toolsColumnRef}
-              className="flex shrink-0 flex-col gap-0 overflow-hidden"
+              ref={hasToolsColumn ? toolsColumnRef : null}
+              className={`flex shrink-0 flex-col gap-0 overflow-hidden ${!hasToolsColumn ? "hidden" : ""}`}
               style={{ width: settings.toolsPanelWidth }}
             >
               {(() => {
-                // Build tool components map, then filter to active + order by settings
                 const toolComponents: Record<string, React.ReactNode> = {
                   terminal: <ToolsPanel cwd={activeProjectPath} />,
                   git: (
@@ -1056,39 +1065,46 @@ export function AppLayout() {
                   ),
                 };
 
-                const orderedTools = settings.toolOrder
-                  .filter((id) => activeTools.has(id) && id in toolComponents)
-                  .map((id) => ({ id, node: toolComponents[id] }));
-
-                const count = orderedTools.length;
+                // All panel tool IDs in display order
+                const allToolIds = settings.toolOrder.filter((id) => id in toolComponents);
+                // Active subset for flex layout sizing
+                const activeToolIds = allToolIds.filter((id) => activeTools.has(id));
+                const count = activeToolIds.length;
                 const ratios = normalizeRatios(settings.toolsSplitRatios, count);
-                // Keep ref in sync so the drag handler always reads correct normalized values
                 normalizedToolRatiosRef.current = ratios;
 
-                return orderedTools.map((tool, i) => (
-                  <div key={tool.id} className="contents">
-                    <div
-                      className="island flex flex-col overflow-hidden rounded-lg bg-background"
-                      style={{ flex: `${ratios[i]} 1 0%`, minHeight: 0 }}
-                    >
-                      {tool.node}
-                    </div>
-                    {i < count - 1 && (
+                // Render ALL tools: active ones get flex layout, inactive ones stay
+                // hidden (display: none) but mounted — preserves terminal processes,
+                // browser sessions, and all internal state across toggles.
+                return allToolIds.map((id) => {
+                  const isActive = activeTools.has(id);
+                  const activeIdx = isActive ? activeToolIds.indexOf(id) : -1;
+
+                  return (
+                    <div key={id} className={isActive ? "contents" : "hidden"}>
                       <div
-                        className="group flex h-2 shrink-0 cursor-row-resize items-center justify-center"
-                        onMouseDown={(e) => handleToolsSplitStart(e, i)}
+                        className="island flex flex-col overflow-hidden rounded-lg bg-background"
+                        style={isActive ? { flex: `${ratios[activeIdx]} 1 0%`, minHeight: 0 } : undefined}
                       >
-                        <div
-                          className={`w-10 h-0.5 rounded-full transition-colors duration-150 ${
-                            isResizing
-                              ? "bg-foreground/40"
-                              : "bg-transparent group-hover:bg-foreground/25"
-                          }`}
-                        />
+                        {toolComponents[id]}
                       </div>
-                    )}
-                  </div>
-                ));
+                      {isActive && activeIdx < count - 1 && (
+                        <div
+                          className="group flex h-2 shrink-0 cursor-row-resize items-center justify-center"
+                          onMouseDown={(e) => handleToolsSplitStart(e, activeIdx)}
+                        >
+                          <div
+                            className={`w-10 h-0.5 rounded-full transition-colors duration-150 ${
+                              isResizing
+                                ? "bg-foreground/40"
+                                : "bg-transparent group-hover:bg-foreground/25"
+                            }`}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
               })()}
             </div>
           </>

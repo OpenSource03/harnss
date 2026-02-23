@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { app, BrowserWindow, globalShortcut } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, session, systemPreferences } from "electron";
 import path from "path";
 import http from "http";
 
@@ -38,7 +38,6 @@ import * as agentRegistryIpc from "./ipc/agent-registry";
 import * as acpSessionsIpc from "./ipc/acp-sessions";
 import * as mcpIpc from "./ipc/mcp";
 import * as settingsIpc from "./ipc/settings";
-import { ipcMain } from "electron";
 
 // --- Performance: Chromium/V8 flags (must be set before app.whenReady()) ---
 app.commandLine.appendSwitch("enable-gpu-rasterization"); // force GPU raster for all content
@@ -215,9 +214,50 @@ function openDevToolsWindow(): void {
 }
 
 // --- App lifecycle ---
+// --- Speech dictation IPC ---
+ipcMain.handle("speech:start-native-dictation", () => {
+  if (process.platform === "darwin") {
+    // Sends the macOS Cocoa selector to start native dictation in the focused text field
+    Menu.sendActionToFirstResponder("startDictation:");
+    return { ok: true };
+  }
+  return { ok: false, reason: "not-supported" };
+});
+
+ipcMain.handle("speech:get-platform", () => process.platform);
+
+ipcMain.handle("speech:request-mic-permission", async () => {
+  if (process.platform === "darwin") {
+    const status = systemPreferences.getMediaAccessStatus("microphone");
+    if (status === "granted") return { granted: true };
+    const granted = await systemPreferences.askForMediaAccess("microphone");
+    return { granted };
+  }
+  // Windows/Linux don't require Electron-level mic permission — getUserMedia handles it
+  return { granted: true };
+});
+
 app.whenReady().then(() => {
   createWindow();
   initAutoUpdater(getMainWindow);
+
+  // Allow microphone access for Whisper voice dictation (getUserMedia in renderer)
+  session.defaultSession.setPermissionRequestHandler(
+    (webContents, permission, callback) => {
+      // Only grant media permission to the main window's renderer, not webviews
+      if (permission === "media" && webContents.id === mainWindow?.webContents.id) {
+        callback(true);
+        return;
+      }
+      callback(false);
+    },
+  );
+  session.defaultSession.setPermissionCheckHandler(
+    (webContents, permission) => {
+      if (permission === "media" && webContents?.id === mainWindow?.webContents.id) return true;
+      return false;
+    },
+  );
 
   // Set dock icon in dev mode — packaged builds get it from the .app bundle
   if (process.platform === "darwin" && app.dock) {

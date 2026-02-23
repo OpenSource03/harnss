@@ -112,6 +112,9 @@ module.exports = {
     gatekeeperAssess: false,
     entitlements: "build/entitlements.mac.plist",
     entitlementsInherit: "build/entitlements.mac.plist",
+    extendInfo: {
+      NSMicrophoneUsageDescription: "OpenACP UI uses the microphone for voice dictation to transcribe speech into text.",
+    },
     files: [
       "!node_modules/mica-electron/**",
     ],

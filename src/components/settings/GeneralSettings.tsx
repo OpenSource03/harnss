@@ -1,16 +1,18 @@
 import { memo, useState, useCallback, useEffect } from "react";
-import { Download, MessageSquare, Code } from "lucide-react";
+import { Download, MessageSquare, Code, Mic } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 // ── Types ──
 
 type PreferredEditor = "auto" | "cursor" | "code" | "zed";
+type VoiceDictationMode = "native" | "whisper";
 
 interface AppSettings {
   allowPrereleaseUpdates: boolean;
   defaultChatLimit: number;
   preferredEditor: PreferredEditor;
+  voiceDictation: VoiceDictationMode;
 }
 
 interface GeneralSettingsProps {
@@ -52,12 +54,14 @@ export const GeneralSettings = memo(function GeneralSettings({
   const [allowPrerelease, setAllowPrerelease] = useState(true);
   const [chatLimit, setChatLimit] = useState(10);
   const [preferredEditor, setPreferredEditor] = useState<PreferredEditor>("auto");
+  const [voiceDictation, setVoiceDictation] = useState<VoiceDictationMode>("native");
 
   useEffect(() => {
     if (appSettings) {
       setAllowPrerelease(appSettings.allowPrereleaseUpdates);
       setChatLimit(appSettings.defaultChatLimit || 10);
       setPreferredEditor(appSettings.preferredEditor || "auto");
+      setVoiceDictation(appSettings.voiceDictation || "native");
     }
   }, [appSettings]);
 
@@ -82,6 +86,14 @@ export const GeneralSettings = memo(function GeneralSettings({
     async (value: PreferredEditor) => {
       setPreferredEditor(value); // optimistic
       await onUpdateAppSettings({ preferredEditor: value });
+    },
+    [onUpdateAppSettings],
+  );
+
+  const handleVoiceDictationChange = useCallback(
+    async (value: VoiceDictationMode) => {
+      setVoiceDictation(value); // optimistic
+      await onUpdateAppSettings({ voiceDictation: value });
     },
     [onUpdateAppSettings],
   );
@@ -169,6 +181,30 @@ export const GeneralSettings = memo(function GeneralSettings({
                 <option value="cursor">Cursor</option>
                 <option value="code">VS Code</option>
                 <option value="zed">Zed</option>
+              </select>
+            </SettingRow>
+          </div>
+
+          {/* ── Voice Dictation section ── */}
+          <div className="border-t border-foreground/[0.04] py-3">
+            <div className="mb-1 flex items-center gap-2">
+              <Mic className="h-4 w-4 text-muted-foreground" />
+              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Voice Dictation
+              </span>
+            </div>
+
+            <SettingRow
+              label="Dictation mode"
+              description="Native uses your OS dictation (macOS only). Whisper runs a local AI model for speech-to-text on all platforms (~40 MB download on first use)."
+            >
+              <select
+                value={voiceDictation}
+                onChange={(e) => handleVoiceDictationChange(e.target.value as VoiceDictationMode)}
+                className="h-8 rounded-md border border-foreground/10 bg-background px-2 pe-7 text-sm text-foreground outline-none transition-colors hover:border-foreground/20 focus:border-foreground/30 focus:ring-1 focus:ring-foreground/20"
+              >
+                <option value="native">Native (OS)</option>
+                <option value="whisper">Whisper (Local AI)</option>
               </select>
             </SettingRow>
           </div>

@@ -64,7 +64,7 @@ interface SessionGroup {
   sessions: ChatSession[];
 }
 
-/** Sort key: latest message timestamp, falling back to creation time. */
+/** Sort key: latest user-message timestamp, falling back to creation time. */
 function getSortTimestamp(session: ChatSession): number {
   return session.lastMessageAt ?? session.createdAt;
 }
@@ -83,7 +83,7 @@ function groupSessionsByDate(sessions: ChatSession[]): SessionGroup[] {
     { label: "Older", sessions: [] },
   ];
 
-  // Sort by most recent activity first
+  // Sort by most recent user activity first
   const sorted = [...sessions].sort((a, b) => getSortTimestamp(b) - getSortTimestamp(a));
 
   for (const session of sorted) {
@@ -526,8 +526,8 @@ function ProjectSection({
       {/* Nested chats */}
       {expanded && (
         <div className="ms-5 overflow-hidden">
-          {groups.map((group) => (
-            <div key={group.label} className="mb-1.5">
+          {groups.map((group, i) => (
+            <div key={group.label} className={i < groups.length - 1 ? "mb-1.5" : ""}>
               <p className="mb-0.5 px-2 text-[11px] font-medium text-sidebar-foreground/30 uppercase tracking-wider">
                 {group.label}
               </p>
@@ -548,7 +548,7 @@ function ProjectSection({
           {hasMore && (
             <button
               onClick={() => setVisibleCount((prev) => prev + 20)}
-              className="group/more mt-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] text-sidebar-foreground/40 transition-colors hover:bg-sidebar-accent/40 hover:text-sidebar-foreground/60"
+              className="group/more flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] text-sidebar-foreground/40 transition-colors hover:bg-sidebar-accent/40 hover:text-sidebar-foreground/60"
             >
               <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-hover/more:translate-y-px" />
               <span>

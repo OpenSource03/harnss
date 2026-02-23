@@ -1,6 +1,6 @@
 {
   "name": "open-acp-ui",
-  "version": "0.5.0",
+  "version": "0.0.1",
   "productName": "OpenACP UI",
   "description": "Open-source desktop client for the Agent Client Protocol",
   "author": {
@@ -29,6 +29,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
     "@anthropic-ai/claude-agent-sdk": "^0.2.50",
+    "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "electron-liquid-glass": "^1.1.1",
     "electron-updater": "^6.8.3",

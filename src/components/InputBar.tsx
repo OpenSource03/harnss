@@ -13,6 +13,8 @@ import {
   File,
   Folder,
   Loader2,
+  Mic,
+  MicOff,
   Paperclip,
   Shield,
   Square,
@@ -33,6 +35,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { ImageAttachment, ContextUsage, AgentDefinition, ACPConfigOption, ModelInfo, AcpPermissionBehavior } from "@/types";
 import { flattenConfigOptions } from "@/types/acp";
+import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 
 const ACP_PERMISSION_BEHAVIORS = [
   { id: "ask" as const, label: "Ask", description: "Show permission prompt" },
@@ -116,6 +119,8 @@ interface InputBarProps {
   lockedEngine?: "claude" | "acp" | null;
   /** Non-null when an ACP session is active — switching to a different ACP agent opens new chat */
   lockedAgentId?: string | null;
+  /** Number of messages currently queued for sending */
+  queuedCount?: number;
 }
 
 // Simple fuzzy match: all query chars must appear in order
@@ -133,6 +138,31 @@ function fuzzyMatch(query: string, target: string): { match: boolean; score: num
   if (qi === q.length) return { match: true, score: 10 + (qi / target.length) };
 
   return { match: false, score: 0 };
+}
+
+/** Insert text at the current cursor position in a contentEditable element */
+function insertTextAtCursor(el: HTMLElement | null, text: string): void {
+  if (!el) return;
+  el.focus();
+
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) {
+    // No cursor — append to end
+    el.appendChild(document.createTextNode(text));
+  } else {
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const textNode = document.createTextNode(text);
+    range.insertNode(textNode);
+    // Move cursor after inserted text
+    range.setStartAfter(textNode);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // Trigger input handler so hasContent updates and send button enables
+  el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 /** Extract full text + mention paths from a contentEditable element */
@@ -184,6 +214,7 @@ export const InputBar = memo(function InputBar({
   supportedModels,
   lockedEngine,
   lockedAgentId,
+  queuedCount = 0,
 }: InputBarProps) {
   const [hasContent, setHasContent] = useState(false);
   const [showMentions, setShowMentions] = useState(false);
@@ -193,6 +224,11 @@ export const InputBar = memo(function InputBar({
   const [isSending, setIsSending] = useState(false);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+
+  // ── Voice dictation ──
+  const speech = useSpeechRecognition({
+    onResult: (text) => insertTextAtCursor(editableRef.current, text),
+  });
 
   const editableRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -357,7 +393,7 @@ export const InputBar = memo(function InputBar({
 
     const { text: fullText, mentionPaths } = extractEditableContent(el);
     const trimmed = fullText.trim();
-    if ((!trimmed && attachments.length === 0) || isProcessing || isSending) return;
+    if ((!trimmed && attachments.length === 0) || isSending) return;
 
     const currentImages = attachments.length > 0 ? [...attachments] : undefined;
 
@@ -393,7 +429,7 @@ export const InputBar = memo(function InputBar({
     setHasContent(false);
     setAttachments([]);
     closeMentions();
-  }, [attachments, isProcessing, isSending, projectPath, onSend, closeMentions]);
+  }, [attachments, isSending, projectPath, onSend, closeMentions]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (showMentions && results.length > 0) {
@@ -427,7 +463,7 @@ export const InputBar = memo(function InputBar({
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (!isProcessing && !isSending) {
+      if (!isSending) {
         handleSend();
       }
     }
@@ -549,7 +585,9 @@ export const InputBar = memo(function InputBar({
         className={`pointer-events-auto rounded-2xl border bg-background/55 shadow-lg backdrop-blur-lg transition-colors focus-within:border-border ${
           isDragging
             ? "border-primary/60 bg-primary/5"
-            : "border-border/60"
+            : speech.isListening
+              ? "border-red-400/40 ring-1 ring-red-400/20"
+              : "border-border/60"
         }`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -598,7 +636,7 @@ export const InputBar = memo(function InputBar({
               {isCompacting
                 ? "Compacting context..."
                 : isProcessing
-                  ? `${selectedAgent?.name ?? "Claude"} is responding...`
+                  ? `${selectedAgent?.name ?? "Claude"} is responding... (messages will be queued)`
                   : "Ask anything, @ to tag files"}
             </div>
           )}
@@ -649,6 +687,57 @@ export const InputBar = memo(function InputBar({
             >
               <Paperclip className="h-3.5 w-3.5" />
             </button>
+
+            {/* Voice dictation button */}
+            {speech.isAvailable ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={speech.toggle}
+                    disabled={speech.isModelLoading || speech.isTranscribing}
+                    className={`flex shrink-0 items-center justify-center rounded-lg px-2 py-1 transition-colors ${
+                      speech.isListening
+                        ? "text-red-400 bg-red-500/10 recording-pulse"
+                        : speech.isTranscribing
+                          ? "text-amber-400"
+                          : speech.isModelLoading
+                            ? "text-muted-foreground/40 cursor-wait"
+                            : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                    }`}
+                  >
+                    {speech.isListening ? (
+                      <MicOff className="h-3.5 w-3.5" />
+                    ) : speech.isModelLoading || speech.isTranscribing ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Mic className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {speech.error
+                    ? speech.error
+                    : speech.isModelLoading
+                      ? `Loading speech model… ${speech.loadProgress.toFixed(0)}%`
+                      : speech.isTranscribing
+                        ? "Transcribing…"
+                        : speech.isListening
+                          ? "Stop dictation"
+                          : "Voice dictation"}
+                </TooltipContent>
+              </Tooltip>
+            ) : speech.nativeHint ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="flex shrink-0 items-center justify-center rounded-lg px-2 py-1 text-muted-foreground/40 cursor-default"
+                  >
+                    <Mic className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{speech.nativeHint}</TooltipContent>
+              </Tooltip>
+            ) : null}
 
             {agents && agents.length > 1 && onAgentChange && (
               <DropdownMenu>
@@ -925,16 +1014,17 @@ export const InputBar = memo(function InputBar({
                 </Tooltip>
               );
             })()}
-            {isProcessing ? (
+            {isProcessing && (
               <Button
                 size="icon"
-                variant="destructive"
+                variant="ghost"
                 onClick={onStop}
-                className="h-8 w-8 rounded-full"
+                className="h-7 w-7 rounded-full text-muted-foreground hover:text-destructive"
               >
-                <Square className="h-3.5 w-3.5" />
+                <Square className="h-3 w-3" />
               </Button>
-            ) : (
+            )}
+            <div className="relative">
               <Button
                 size="icon"
                 onClick={handleSend}
@@ -943,7 +1033,12 @@ export const InputBar = memo(function InputBar({
               >
                 <ArrowUp className="h-4 w-4" />
               </Button>
-            )}
+              {queuedCount > 0 && (
+                <span className="absolute -end-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground">
+                  {queuedCount}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>

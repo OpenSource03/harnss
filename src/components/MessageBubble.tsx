@@ -1,5 +1,5 @@
-import { memo, useMemo, createContext, useContext, type ReactNode } from "react";
-import { AlertCircle, File, Folder, Info, RotateCcw, Undo2 } from "lucide-react";
+import { memo, useMemo, useRef, useEffect, useState, createContext, useContext, type ReactNode } from "react";
+import { AlertCircle, Clock, File, Folder, Info, RotateCcw, Undo2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -83,6 +83,19 @@ function renderWithMentions(text: string): ReactNode[] {
   });
 }
 
+function commonPrefixLength(a: string, b: string): number {
+  const max = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < max && a.charCodeAt(i) === b.charCodeAt(i)) i += 1;
+  return i;
+}
+
+
+interface AnimatedChunk {
+  id: number;
+  text: string;
+}
+
 interface MessageBubbleProps {
   message: UIMessage;
   isContinuation?: boolean;
@@ -114,15 +127,67 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
   // Prefer pre-computed displayContent; fall back to regex stripping for old persisted sessions
   const displayContent = useMemo(() => isUser ? (message.displayContent ?? stripFileContext(message.content)) : message.content, [isUser, message.content, message.displayContent]);
 
+  // Streaming chunk queue for assistant text.
+  // Keeps each chunk in its own span so earlier fades are not interrupted.
+  const prevStreamContentRef = useRef(message.content);
+  const nextChunkIdRef = useRef(0);
+  const [streamBaseText, setStreamBaseText] = useState(message.content);
+  const [streamChunks, setStreamChunks] = useState<AnimatedChunk[]>([]);
+
+  useEffect(() => {
+    const curr = message.content;
+    const prev = prevStreamContentRef.current;
+    prevStreamContentRef.current = curr;
+
+    if (!message.isStreaming) {
+      setStreamBaseText(curr);
+      setStreamChunks([]);
+      return;
+    }
+
+    if (!prev) {
+      setStreamBaseText("");
+      setStreamChunks(curr ? [{ id: nextChunkIdRef.current++, text: curr }] : []);
+      return;
+    }
+
+    const prefixLen = commonPrefixLength(prev, curr);
+    const appendedLen = curr.length - prefixLen;
+
+    if (appendedLen <= 0) {
+      setStreamBaseText(curr);
+      setStreamChunks([]);
+      return;
+    }
+
+    const changedInMiddle = prefixLen < prev.length;
+    if (changedInMiddle) {
+      setStreamBaseText(curr);
+      setStreamChunks([]);
+      return;
+    }
+
+    const appended = curr.slice(prev.length);
+    if (!appended) return;
+
+    setStreamChunks((chunks) => [
+      ...chunks,
+      { id: nextChunkIdRef.current++, text: appended },
+    ]);
+  }, [message.content, message.isStreaming]);
+
   if (isUser) {
     const checkpointId = message.checkpointId;
     const canRevert = !!checkpointId && (!!onRevert || !!onFullRevert);
     return (
-      <div className="group/user flex justify-end px-4 py-1.5">
+      <div className={cn("group/user flex justify-end px-4 py-1.5", message.isQueued && "opacity-60")}>
         <div className="max-w-[80%]">
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="rounded-2xl rounded-tr-sm bg-foreground/[0.06] px-3.5 py-2 text-sm text-foreground wrap-break-word whitespace-pre-wrap">
+              <div className={cn(
+                "rounded-2xl rounded-tr-sm bg-foreground/[0.06] px-3.5 py-2 text-sm text-foreground wrap-break-word whitespace-pre-wrap",
+                message.isQueued && "border border-dashed border-foreground/10",
+              )}>
                 {message.images && message.images.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-2">
                     {message.images.map((img) => (
@@ -136,6 +201,12 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
                   </div>
                 )}
                 {renderWithMentions(displayContent)}
+                {message.isQueued && (
+                  <div className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Clock className="h-3 w-3" />
+                    Queued
+                  </div>
+                )}
               </div>
             </TooltipTrigger>
             <TooltipContent side="left">
@@ -188,14 +259,23 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
               />
             )}
             {message.content ? (
-              <div className="prose prose-invert prose-sm max-w-none text-foreground">
-                <ReactMarkdown
-                  remarkPlugins={REMARK_PLUGINS}
-                  components={MD_COMPONENTS}
-                >
-                  {message.content}
-                </ReactMarkdown>
-              </div>
+              message.isStreaming ? (
+                <div className="max-w-none whitespace-pre-wrap text-sm leading-6 text-foreground">
+                  {streamBaseText}
+                  {streamChunks.map((chunk) => (
+                    <span key={chunk.id} className="stream-chunk-enter">{chunk.text}</span>
+                  ))}
+                </div>
+              ) : (
+                <div className="prose prose-invert prose-sm max-w-none text-foreground">
+                  <ReactMarkdown
+                    remarkPlugins={REMARK_PLUGINS}
+                    components={MD_COMPONENTS}
+                  >
+                    {message.content}
+                  </ReactMarkdown>
+                </div>
+              )
             ) : message.isStreaming && !message.thinking ? (
               <span className="inline-block h-4 w-1.5 animate-pulse rounded-sm bg-foreground/40" />
             ) : null}
@@ -215,6 +295,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
   prev.message.images === next.message.images &&
   prev.message.isError === next.message.isError &&
   prev.message.checkpointId === next.message.checkpointId &&
+  prev.message.isQueued === next.message.isQueued &&
   prev.isContinuation === next.isContinuation &&
   prev.onRevert === next.onRevert &&
   prev.onFullRevert === next.onFullRevert,

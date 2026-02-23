@@ -14,6 +14,8 @@ interface ChatViewProps {
   extraBottomPadding?: boolean;
   scrollToMessageId?: string;
   onScrolledToMessage?: () => void;
+  /** Session ID — used to force-scroll to bottom on session switch */
+  sessionId?: string;
   /** Called when user clicks "Revert files only" on a user message */
   onRevert?: (checkpointId: string) => void;
   /** Called when user clicks "Revert files + chat" on a user message */
@@ -22,15 +24,20 @@ interface ChatViewProps {
   onViewTurnChanges?: (turnIndex: number) => void;
 }
 
-export const ChatView = memo(function ChatView({ messages, isProcessing, extraBottomPadding, scrollToMessageId, onScrolledToMessage, onRevert, onFullRevert, onViewTurnChanges }: ChatViewProps) {
+export const ChatView = memo(function ChatView({ messages, isProcessing, extraBottomPadding, scrollToMessageId, onScrolledToMessage, sessionId, onRevert, onFullRevert, onViewTurnChanges }: ChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const scrollTimerRef = useRef(0);
+  const forceAutoScrollUntilRef = useRef(0);
+  const settleTimersRef = useRef<number[]>([]);
 
-  // Throttled auto-scroll: instant during streaming, only if near bottom
-  const scrollToBottom = useCallback(() => {
+  // Throttled auto-scroll: instant during streaming, only if near bottom.
+  // During session switch, temporarily force auto-follow so long-chat reflow
+  // (content-visibility / async block expansion) still settles at the true bottom.
+  const scrollToBottom = useCallback((opts?: { force?: boolean }) => {
+    const shouldForce = opts?.force || Date.now() < forceAutoScrollUntilRef.current;
     const now = Date.now();
-    if (now - scrollTimerRef.current < 250) return; // throttle ~4/sec
+    if (!shouldForce && now - scrollTimerRef.current < 250) return; // throttle ~4/sec
     scrollTimerRef.current = now;
 
     const viewport = scrollAreaRef.current?.querySelector<HTMLElement>(
@@ -40,14 +47,44 @@ export const ChatView = memo(function ChatView({ messages, isProcessing, extraBo
 
     const { scrollTop, scrollHeight, clientHeight } = viewport;
     const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
-    if (!isNearBottom) return;
+    if (!shouldForce && !isNearBottom) return;
 
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
+    if (shouldForce) {
+      viewport.scrollTop = viewport.scrollHeight;
+    }
   }, []);
+
+  const clearSettleTimers = useCallback(() => {
+    for (const timer of settleTimersRef.current) {
+      clearTimeout(timer);
+    }
+    settleTimersRef.current = [];
+  }, []);
+
+  const scheduleSettleToBottom = useCallback(() => {
+    clearSettleTimers();
+    // Re-attempt over ~1.2s to catch delayed layout growth in long/running sessions.
+    const delays = [0, 32, 96, 180, 320, 520, 800, 1200];
+    for (const delay of delays) {
+      const timer = window.setTimeout(() => {
+        scrollToBottom({ force: true });
+      }, delay);
+      settleTimersRef.current.push(timer);
+    }
+  }, [clearSettleTimers, scrollToBottom]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  // Force-scroll to bottom on session switch, bypassing the proximity guard
+  useEffect(() => {
+    if (!sessionId) return;
+    scrollTimerRef.current = 0;
+    forceAutoScrollUntilRef.current = Date.now() + 1800;
+    scheduleSettleToBottom();
+  }, [sessionId, scheduleSettleToBottom]);
 
   // ResizeObserver on scroll content: catches height changes from collapsible
   // expansion (ThinkingBlock, tool details, etc.) that don't trigger a messages update
@@ -65,9 +102,13 @@ export const ChatView = memo(function ChatView({ messages, isProcessing, extraBo
     return () => observer.disconnect();
   }, [scrollToBottom]);
 
+  useEffect(() => clearSettleTimers, [clearSettleTimers]);
+
   // Scroll to specific message (from search navigation)
   useEffect(() => {
     if (!scrollToMessageId) return;
+    forceAutoScrollUntilRef.current = 0;
+    clearSettleTimers();
     const el = scrollAreaRef.current?.querySelector(`[data-message-id="${scrollToMessageId}"]`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -94,7 +135,7 @@ export const ChatView = memo(function ChatView({ messages, isProcessing, extraBo
       }
     }, 500);
     return () => clearTimeout(retry);
-  }, [scrollToMessageId, onScrolledToMessage]);
+  }, [scrollToMessageId, onScrolledToMessage, clearSettleTimers]);
 
   // Pre-compute continuation IDs in O(n) forward pass
   const continuationIds = useMemo(() => {

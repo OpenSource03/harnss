@@ -1,6 +1,7 @@
 import type { ToolUseResult } from "./protocol";
 
 export type PreferredEditor = "auto" | "cursor" | "code" | "zed";
+export type VoiceDictationMode = "native" | "whisper";
 
 /** Main-process app settings (persisted to JSON file in data dir). */
 export interface AppSettings {
@@ -10,6 +11,8 @@ export interface AppSettings {
   defaultChatLimit: number;
   /** Preferred code editor for "Open in Editor" actions (default: "auto") */
   preferredEditor: PreferredEditor;
+  /** Voice dictation mode: "native" uses OS dictation, "whisper" uses local AI model (default: "native") */
+  voiceDictation: VoiceDictationMode;
 }
 
 export interface SpaceColor {
@@ -91,6 +94,8 @@ export interface UIMessage {
   isError?: boolean;
   /** SDK checkpoint UUID — when present, files can be reverted to the state before this message */
   checkpointId?: string;
+  /** When true, this user message is waiting in the queue — not yet sent to the agent */
+  isQueued?: boolean;
 }
 
 export interface SessionInfo {

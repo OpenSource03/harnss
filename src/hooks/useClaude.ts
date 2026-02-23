@@ -690,6 +690,22 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
     [],
   );
 
+  /** Send a message without adding it to chat (used for queued messages already in the UI) */
+  const sendRaw = useCallback(
+    async (text: string, images?: ImageAttachment[]): Promise<boolean> => {
+      if (!sessionIdRef.current) return false;
+      const content = buildSdkContent(text, images);
+      const result = await window.claude.send(sessionIdRef.current, {
+        type: "user",
+        message: { role: "user", content },
+      });
+      if (result?.error) return false;
+      setIsProcessing(true);
+      return true;
+    },
+    [],
+  );
+
   const stop = useCallback(async () => {
     if (!sessionIdRef.current) return;
     await window.claude.stop(sessionIdRef.current);
@@ -874,6 +890,7 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
     contextUsage,
     isCompacting,
     send,
+    sendRaw,
     stop,
     interrupt,
     compact,

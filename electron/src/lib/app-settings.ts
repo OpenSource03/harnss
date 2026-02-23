@@ -15,6 +15,7 @@ import { getDataDir } from "./data-dir";
 // ── Schema ──
 
 export type PreferredEditor = "auto" | "cursor" | "code" | "zed";
+export type VoiceDictationMode = "native" | "whisper";
 
 export interface AppSettings {
   /** Include pre-release versions when checking for updates (default: true) */
@@ -23,12 +24,15 @@ export interface AppSettings {
   defaultChatLimit: number;
   /** Preferred code editor for "Open in Editor" actions (default: "auto" = try cursor → code → zed) */
   preferredEditor: PreferredEditor;
+  /** Voice dictation mode: "native" uses OS dictation, "whisper" uses local AI model (default: "native") */
+  voiceDictation: VoiceDictationMode;
 }
 
 const DEFAULTS: AppSettings = {
   allowPrereleaseUpdates: true,
   defaultChatLimit: 10,
   preferredEditor: "auto",
+  voiceDictation: "native",
 };
 
 // ── Internal state ──
