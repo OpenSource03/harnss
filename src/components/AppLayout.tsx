@@ -26,9 +26,11 @@ import { ChangesPanel } from "./ChangesPanel";
 import { SettingsView } from "./SettingsView";
 import { useBackgroundAgents } from "@/hooks/useBackgroundAgents";
 import { useAgentRegistry } from "@/hooks/useAgentRegistry";
+import { useNotifications } from "@/hooks/useNotifications";
 import { resolveModelValue } from "@/lib/model-utils";
 import { isMac } from "@/lib/utils";
 import type { TodoItem, ImageAttachment, Space, SpaceColor, AgentDefinition, AcpPermissionBehavior } from "@/types";
+import type { NotificationSettings } from "@/types/ui";
 
 export function AppLayout() {
   const sidebar = useSidebar();
@@ -37,14 +39,14 @@ export function AppLayout() {
   // Read ACP permission behavior early — it's a global setting (same localStorage key as useSettings)
   // so we can read it before useSettings which depends on manager.activeSession for per-project scoping
   const acpPermissionBehavior = (localStorage.getItem("openacpui-acp-permission-behavior") ?? "ask") as AcpPermissionBehavior;
-  const manager = useSessionManager(projectManager.projects, acpPermissionBehavior);
+  const manager = useSessionManager(projectManager.projects, acpPermissionBehavior, spaceManager.setActiveSpaceId);
 
   // Derive activeProjectId early so useSettings can scope per-project
   const activeProjectId = manager.activeSession?.projectId ?? manager.draftProjectId;
   const activeProjectPath = projectManager.projects.find((p) => p.id === activeProjectId)?.path;
 
   const settings = useSettings(activeProjectId ?? null);
-  const { agents, saveAgent, deleteAgent } = useAgentRegistry();
+  const { agents, refresh: refreshAgents, saveAgent, deleteAgent } = useAgentRegistry();
 
   const [selectedAgent, setSelectedAgent] = useState<AgentDefinition | null>(null);
   const handleAgentChange = useCallback((agent: AgentDefinition | null) => {
@@ -66,9 +68,10 @@ export function AppLayout() {
         permissionMode: settings.permissionMode,
         engine: wantedEngine,
         agentId: agent?.id ?? "claude-code",
+        cachedConfigOptions: agent?.cachedConfigOptions,
       });
     } else {
-      manager.setDraftAgent(agent?.engine ?? "claude", agent?.id ?? "claude-code");
+      manager.setDraftAgent(agent?.engine ?? "claude", agent?.id ?? "claude-code", agent?.cachedConfigOptions);
     }
   }, [manager.setDraftAgent, manager.isDraft, manager.activeSession, manager.createSession, settings.model, settings.permissionMode]);
 
@@ -82,7 +85,35 @@ export function AppLayout() {
     ? manager.activeSession.agentId
     : null;
 
+  // Persist ACP config options cache when live session provides them,
+  // then refresh agent registry so next agent selection uses cached values
+  useEffect(() => {
+    const agentId = manager.activeSession?.agentId;
+    if (!agentId || manager.activeSession?.engine !== "acp") return;
+    if (!manager.acpConfigOptions?.length) return;
+
+    window.claude.agents.updateCachedConfig(agentId, manager.acpConfigOptions)
+      .then(() => refreshAgents());
+  }, [manager.acpConfigOptions, manager.activeSession, refreshAgents]);
+
   const [showSettings, setShowSettings] = useState(false);
+
+  // ── Notification settings (loaded from main-process AppSettings) ──
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null);
+
+  // Load on mount + re-fetch when settings panel closes (so changes take effect immediately)
+  useEffect(() => {
+    window.claude.settings.get().then((s) => {
+      if (s?.notifications) setNotificationSettings(s.notifications as NotificationSettings);
+    });
+  }, [showSettings]);
+
+  // Fire OS notifications and sounds for permission prompts + session completion
+  useNotifications({
+    pendingPermission: manager.pendingPermission,
+    notificationSettings,
+    isProcessing: manager.isProcessing,
+  });
 
   // When settings closes, fire resize so hidden tool panels (xterm) re-fit
   useEffect(() => {
@@ -154,6 +185,7 @@ export function AppLayout() {
         permissionMode: settings.permissionMode,
         engine: agent?.engine ?? "claude",
         agentId: agent?.id ?? "claude-code",
+        cachedConfigOptions: agent?.cachedConfigOptions,
       });
     },
     [manager.createSession, settings.model, settings.permissionMode, selectedAgent],
@@ -177,6 +209,7 @@ export function AppLayout() {
           permissionMode: settings.permissionMode,
           engine: wantedEngine,
           agentId: selectedAgent?.id ?? "claude-code",
+          cachedConfigOptions: selectedAgent?.cachedConfigOptions,
         });
       }
       await manager.send(text, images, displayText);

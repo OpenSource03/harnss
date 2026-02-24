@@ -1,7 +1,24 @@
 import type { ToolUseResult } from "./protocol";
+import type { ACPConfigOption } from "./acp";
 
 export type PreferredEditor = "auto" | "cursor" | "code" | "zed";
 export type VoiceDictationMode = "native" | "whisper";
+
+// ── Notification settings ──
+
+export type NotificationTrigger = "always" | "unfocused" | "never";
+
+export interface NotificationEventSettings {
+  osNotification: NotificationTrigger;
+  sound: NotificationTrigger;
+}
+
+export interface NotificationSettings {
+  exitPlanMode: NotificationEventSettings;
+  permissions: NotificationEventSettings;
+  askUserQuestion: NotificationEventSettings;
+  sessionComplete: NotificationEventSettings;
+}
 
 /** Main-process app settings (persisted to JSON file in data dir). */
 export interface AppSettings {
@@ -13,6 +30,8 @@ export interface AppSettings {
   preferredEditor: PreferredEditor;
   /** Voice dictation mode: "native" uses OS dictation, "whisper" uses local AI model (default: "native") */
   voiceDictation: VoiceDictationMode;
+  /** Per-event notification and sound configuration */
+  notifications: NotificationSettings;
 }
 
 export interface SpaceColor {
@@ -217,6 +236,8 @@ export interface AgentDefinition {
   registryVersion?: string;
   /** Description from the registry, shown in agent cards */
   description?: string;
+  /** Cached config options from the last ACP session — shown before session starts */
+  cachedConfigOptions?: ACPConfigOption[];
 }
 
 // ── Model types ──

@@ -17,6 +17,8 @@ export interface AgentDefinition {
   registryVersion?: string;
   /** Description from the registry, shown in agent cards */
   description?: string;
+  /** Cached config options from the last ACP session — shown before session starts */
+  cachedConfigOptions?: unknown[];
 }
 
 const BUILTIN_CLAUDE: AgentDefinition = {
@@ -64,6 +66,14 @@ export function saveAgent(agent: AgentDefinition): void {
 export function deleteAgent(id: string): void {
   if (id === "claude-code") return;
   agents.delete(id);
+  persistUserAgents();
+}
+
+/** Update only the cached config options for an agent (fire-and-forget from renderer) */
+export function updateCachedConfig(id: string, configOptions: unknown[]): void {
+  const agent = agents.get(id);
+  if (!agent || agent.builtIn) return;
+  agent.cachedConfigOptions = configOptions;
   persistUserAgents();
 }
 

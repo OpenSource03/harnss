@@ -16,6 +16,19 @@ import { getDataDir } from "./data-dir";
 
 export type PreferredEditor = "auto" | "cursor" | "code" | "zed";
 export type VoiceDictationMode = "native" | "whisper";
+export type NotificationTrigger = "always" | "unfocused" | "never";
+
+export interface NotificationEventSettings {
+  osNotification: NotificationTrigger;
+  sound: NotificationTrigger;
+}
+
+export interface NotificationSettings {
+  exitPlanMode: NotificationEventSettings;
+  permissions: NotificationEventSettings;
+  askUserQuestion: NotificationEventSettings;
+  sessionComplete: NotificationEventSettings;
+}
 
 export interface AppSettings {
   /** Include pre-release versions when checking for updates (default: true) */
@@ -26,13 +39,23 @@ export interface AppSettings {
   preferredEditor: PreferredEditor;
   /** Voice dictation mode: "native" uses OS dictation, "whisper" uses local AI model (default: "native") */
   voiceDictation: VoiceDictationMode;
+  /** Per-event notification and sound configuration */
+  notifications: NotificationSettings;
 }
+
+const NOTIFICATION_DEFAULTS: NotificationSettings = {
+  exitPlanMode: { osNotification: "unfocused", sound: "always" },
+  permissions: { osNotification: "unfocused", sound: "unfocused" },
+  askUserQuestion: { osNotification: "unfocused", sound: "always" },
+  sessionComplete: { osNotification: "unfocused", sound: "always" },
+};
 
 const DEFAULTS: AppSettings = {
   allowPrereleaseUpdates: true,
   defaultChatLimit: 10,
   preferredEditor: "auto",
   voiceDictation: "native",
+  notifications: NOTIFICATION_DEFAULTS,
 };
 
 // ── Internal state ──
@@ -52,8 +75,20 @@ export function getAppSettings(): AppSettings {
   try {
     const raw = fs.readFileSync(filePath(), "utf-8");
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
-    // Merge with defaults so newly added keys are always present
-    cached = { ...DEFAULTS, ...parsed };
+    // Merge with defaults so newly added keys are always present.
+    // Deep-merge `notifications` so upgrading users get defaults for each event type
+    // even if their settings.json has a partial or missing notifications object.
+    const parsedNotif = parsed.notifications as Partial<NotificationSettings> | undefined;
+    cached = {
+      ...DEFAULTS,
+      ...parsed,
+      notifications: {
+        exitPlanMode: { ...NOTIFICATION_DEFAULTS.exitPlanMode, ...parsedNotif?.exitPlanMode },
+        permissions: { ...NOTIFICATION_DEFAULTS.permissions, ...parsedNotif?.permissions },
+        askUserQuestion: { ...NOTIFICATION_DEFAULTS.askUserQuestion, ...parsedNotif?.askUserQuestion },
+        sessionComplete: { ...NOTIFICATION_DEFAULTS.sessionComplete, ...parsedNotif?.sessionComplete },
+      },
+    };
   } catch {
     cached = { ...DEFAULTS };
   }

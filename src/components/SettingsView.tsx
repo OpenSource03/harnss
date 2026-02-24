@@ -1,6 +1,7 @@
 import { memo, useState, useCallback, useEffect } from "react";
 import {
   SlidersHorizontal,
+  Bell,
   Bot,
   Plug,
   Cpu,
@@ -10,13 +11,15 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { AgentSettings } from "@/components/settings/AgentSettings";
 import { GeneralSettings } from "@/components/settings/GeneralSettings";
+import { NotificationsSettings } from "@/components/settings/NotificationsSettings";
 import { McpSettings } from "@/components/settings/McpSettings";
 import { PlaceholderSection } from "@/components/settings/PlaceholderSection";
 import type { AgentDefinition } from "@/types";
+import type { NotificationSettings } from "@/types/ui";
 
 // ── Section definitions ──
 
-type SettingsSection = "general" | "agents" | "mcp" | "models" | "shortcuts" | "about";
+type SettingsSection = "general" | "notifications" | "agents" | "mcp" | "models" | "shortcuts" | "about";
 
 interface NavItem {
   id: SettingsSection;
@@ -26,6 +29,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: "general", label: "General", icon: SlidersHorizontal },
+  { id: "notifications", label: "Notifications", icon: Bell },
   { id: "agents", label: "ACP Agents", icon: Bot },
   { id: "mcp", label: "MCP Servers", icon: Plug },
   { id: "models", label: "Models", icon: Cpu },
@@ -40,6 +44,7 @@ interface AppSettings {
   defaultChatLimit: number;
   preferredEditor: "auto" | "cursor" | "code" | "zed";
   voiceDictation: "native" | "whisper";
+  notifications: NotificationSettings;
 }
 
 // ── Props ──
@@ -90,6 +95,13 @@ export const SettingsView = memo(function SettingsView({
       case "general":
         return (
           <GeneralSettings
+            appSettings={appSettings}
+            onUpdateAppSettings={updateAppSettings}
+          />
+        );
+      case "notifications":
+        return (
+          <NotificationsSettings
             appSettings={appSettings}
             onUpdateAppSettings={updateAppSettings}
           />

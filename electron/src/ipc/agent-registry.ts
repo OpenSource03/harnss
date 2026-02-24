@@ -4,6 +4,7 @@ import {
   saveAgent,
   deleteAgent,
   loadUserAgents,
+  updateCachedConfig,
 } from "../lib/agent-registry";
 import type { AgentDefinition } from "../lib/agent-registry";
 
@@ -17,6 +18,10 @@ export function register(): void {
   });
   ipcMain.handle("agents:delete", (_e, id: string) => {
     deleteAgent(id);
+    return { ok: true };
+  });
+  ipcMain.handle("agents:update-cached-config", (_e, agentId: string, configOptions: unknown[]) => {
+    updateCachedConfig(agentId, configOptions);
     return { ok: true };
   });
 }

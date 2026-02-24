@@ -14,11 +14,13 @@ interface StartOptions {
   permissionMode?: string;
   engine?: "claude" | "acp";
   agentId?: string;
+  /** Cached config options from previous sessions — shown before session starts */
+  cachedConfigOptions?: ACPConfigOption[];
 }
 
 const DRAFT_ID = "__draft__";
 
-export function useSessionManager(projects: Project[], acpPermissionBehavior: AcpPermissionBehavior = "ask") {
+export function useSessionManager(projects: Project[], acpPermissionBehavior: AcpPermissionBehavior = "ask", onSpaceChange?: (spaceId: string) => void) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
@@ -93,6 +95,9 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
   acpPermissionBehaviorRef.current = acpPermissionBehavior;
   // Stable ref to switchSession so toast callbacks don't capture stale closures
   const switchSessionRef = useRef<(id: string) => Promise<void>>(undefined);
+  // Stable ref for space switching — avoids adding onSpaceChange as a useCallback dependency
+  const onSpaceChangeRef = useRef(onSpaceChange);
+  onSpaceChangeRef.current = onSpaceChange;
 
   const backgroundStoreRef = useRef(new BackgroundSessionStore());
 
@@ -714,6 +719,8 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
       setDraftProjectId(projectId);
       setInitialMessages([]);
       setInitialMeta(null);
+      // Pre-populate config dropdowns from cache for ACP agents (before session starts)
+      setInitialConfigOptions(options?.cachedConfigOptions ?? []);
       setInitialPermission(null);
       setInitialRawAcpPermission(null);
       // Explicitly clear ACP state — when activeSessionId is already DRAFT_ID,
@@ -981,6 +988,13 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
       const session = sessionsRef.current.find((s) => s.id === id);
       if (!session) return;
 
+      // Switch to the correct space for this session's project — ensures that
+      // clicking a permission toast (or any cross-space navigation) lands in the right space
+      const sessionProject = projectsRef.current.find((p) => p.id === session.projectId);
+      if (sessionProject) {
+        onSpaceChangeRef.current?.(sessionProject.spaceId || "default");
+      }
+
       // Restore from background store if available (live session with accumulated events)
       const bgState = backgroundStoreRef.current.consume(id);
       if (bgState) {
@@ -1201,8 +1215,10 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     [findProject, saveCurrentSession, seedBackgroundStore, switchSession],
   );
 
-  const setDraftAgent = useCallback((engine: "claude" | "acp", agentId: string) => {
+  const setDraftAgent = useCallback((engine: "claude" | "acp", agentId: string, cachedConfigOptions?: ACPConfigOption[]) => {
     setStartOptions((prev) => ({ ...prev, engine, agentId }));
+    // Load cached config options so dropdowns show "last known" values during draft
+    setInitialConfigOptions(cachedConfigOptions ?? []);
   }, []);
 
   const setActivePermissionMode = useCallback((permissionMode: string) => {

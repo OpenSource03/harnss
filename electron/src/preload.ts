@@ -167,6 +167,8 @@ contextBridge.exposeInMainWorld("claude", {
     list: () => ipcRenderer.invoke("agents:list"),
     save: (agent: unknown) => ipcRenderer.invoke("agents:save", agent),
     delete: (id: string) => ipcRenderer.invoke("agents:delete", id),
+    updateCachedConfig: (agentId: string, configOptions: unknown[]) =>
+      ipcRenderer.invoke("agents:update-cached-config", agentId, configOptions),
   },
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),

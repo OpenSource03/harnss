@@ -191,6 +191,7 @@ declare global {
         list: () => Promise<AgentDefinition[]>;
         save: (agent: AgentDefinition) => Promise<{ ok?: boolean; error?: string }>;
         delete: (id: string) => Promise<{ ok?: boolean; error?: string }>;
+        updateCachedConfig: (agentId: string, configOptions: ACPConfigOption[]) => Promise<{ ok?: boolean }>;
       };
       settings: {
         get: () => Promise<AppSettings>;
