@@ -29,6 +29,55 @@ jobs:
             echo "No existing release for $TAG, nothing to clean"
           fi
 
+  # macOS: build both arm64 + x64 in one job so electron-builder writes a single
+  # latest-mac.yml containing both architectures. Separate jobs race and the last
+  # one to finish overwrites the other's YAML → wrong arch served to half the users.
+  build-mac:
+    needs: [prepare-release]
+    if: ${{ always() && (needs.prepare-release.result == 'success' || needs.prepare-release.result == 'skipped') }}
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build app
+        run: pnpm build
+
+      - name: Package (mac arm64 + x64)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: >
+          pnpm exec electron-builder
+          --mac
+          --arm64 --x64
+          --config electron-builder.config.js
+          --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenACP-UI-mac
+          path: |
+            release/**/*.dmg
+            release/**/*.zip
+            release/**/*.yml
+            release/**/*.yaml
+            !release/**/*.blockmap
+          retention-days: 30
+
   build:
     needs: [prepare-release]
     if: ${{ always() && (needs.prepare-release.result == 'success' || needs.prepare-release.result == 'skipped') }}
@@ -36,12 +85,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-26
-            platform: mac
-            arch: arm64
-          - os: macos-26
-            platform: mac
-            arch: x64
           - os: windows-latest
             platform: win
             arch: x64
