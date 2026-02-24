@@ -130,7 +130,7 @@ module.exports = {
 
   // --- Windows ---
   win: {
-    target: [{ target: "nsis", arch: ["x64"] }],
+    target: [{ target: "nsis", arch: ["x64", "arm64"] }],
     icon: "build/icon.png",
     files: [
       "!node_modules/electron-liquid-glass/**",
@@ -140,7 +140,8 @@ module.exports = {
       "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-linux/**",
       "!node_modules/node-pty/prebuilds/darwin-*/**",
       "!node_modules/node-pty/prebuilds/linux-*/**",
-      "!node_modules/mica-electron/src/micaElectron_arm64.node",
+      // Keep both mica-electron arch binaries — each NSIS package includes both
+      // (~2 MB overhead) and the module picks the right one at runtime
       "!node_modules/mica-electron/src/micaElectron_ia32.node",
     ],
   },
@@ -150,7 +151,8 @@ module.exports = {
     allowToChangeInstallationDirectory: true,
     perMachine: false,
     deleteAppDataOnUninstall: false,
-    artifactName: "${productName}-Setup-${version}.${ext}",
+    // Include arch in filename so x64 and arm64 installers don't collide
+    artifactName: "${productName}-Setup-${version}-${arch}.${ext}",
   },
 
   // --- Linux ---
