@@ -279,6 +279,31 @@ When working on engine-related code, always consult these local docs:
 
 Always search the web when needed for up-to-date API references, Electron APIs, or third-party package docs.
 
+## Release Conventions
+
+**Title format**: `v{X.Y.Z} — Short descriptive phrase` (e.g., `v0.8.0 — Git Worktrees, ACP Utility Sessions & Streaming Polish`)
+
+**Release notes format**:
+- Start with `## What's New` (for feature releases) or `## Changes` (for smaller releases)
+- Group changes under `### Emoji Section Title` headers (e.g., `### 🌳 Git Worktree Management`)
+- Each bullet: **bold the feature name**, then describe what it does
+- End with `---` separator and `**Full Changelog**: https://github.com/OpenSource03/openacpui/compare/v{prev}...v{current}`
+- Use `gh release create` with tag, then `gh release edit` to set title + notes
+
+**Commit message format** (conventional commits):
+- `feat: short description` — new features
+- `fix: short description` — bug fixes
+- `chore: short description` — maintenance (version bumps, dep updates, CI)
+- First line: imperative, lowercase, no period, under ~72 chars
+- Body (optional): blank line after subject, then explain **why** not what, wrap at ~80 chars
+- Examples from repo: `feat: git worktree management, ACP utility sessions, and streaming UI overhaul`, `fix: build both mac arches in one job to prevent latest-mac.yml race`
+
+**Version bumping**:
+1. Bump `version` in `package.json` (electron-builder uses this, NOT the git tag)
+2. Commit: `chore: bump version to X.Y.Z`
+3. Tag: `git tag vX.Y.Z HEAD && git push origin vX.Y.Z`
+4. Create release: `gh release create vX.Y.Z --title "..." --notes "..."`
+
 ## Coding Conventions
 
 - **Tailwind v4** — no CSS resets, Preflight handles normalization
