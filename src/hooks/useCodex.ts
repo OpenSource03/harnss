@@ -7,7 +7,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { UIMessage, PermissionRequest, SessionInfo, ContextUsage, TodoItem, PermissionBehavior, ModelInfo } from "@/types";
+import type { UIMessage, PermissionRequest, SessionInfo, ContextUsage, TodoItem, PermissionBehavior, ModelInfo, ImageAttachment } from "@/types";
 import type { CodexSessionEvent, CodexApprovalRequest, CodexExitEvent } from "@/types/codex";
 import type { CodexThreadItem } from "@/types/codex";
 import {
@@ -16,6 +16,7 @@ import {
   codexItemToToolInput,
   codexItemToToolResult,
   codexPlanToTodos,
+  imageAttachmentsToCodexInputs,
 } from "@/lib/codex-adapter";
 
 interface UseCodexOptions {
@@ -461,9 +462,33 @@ export function useCodex({ sessionId, initialMessages, initialMeta, initialPermi
   }, [sessionId, handleNotification, handleApproval, handleExit]);
 
   // ── Actions ──
+  const sendRaw = useCallback(
+    async (text: string, images?: ImageAttachment[]): Promise<boolean> => {
+      if (!sessionId) return false;
+      setIsProcessing(true);
+      try {
+        const result = await window.claude.codex.send(
+          sessionId,
+          text,
+          imageAttachmentsToCodexInputs(images),
+          codexEffort,
+        );
+        if (result?.error) {
+          setIsProcessing(false);
+          return false;
+        }
+        return true;
+      } catch {
+        setIsProcessing(false);
+        return false;
+      }
+    },
+    [sessionId, codexEffort],
+  );
+
   const send = useCallback(
-    async (text: string, images?: unknown[]) => {
-      if (!sessionId) return;
+    async (text: string, images?: ImageAttachment[], displayText?: string): Promise<boolean> => {
+      if (!sessionId) return false;
       // Add user message to UI immediately
       setMessages((prev) => [
         ...prev,
@@ -472,15 +497,27 @@ export function useCodex({ sessionId, initialMessages, initialMeta, initialPermi
           role: "user",
           content: text,
           timestamp: Date.now(),
+          ...(images?.length ? { images } : {}),
+          ...(displayText ? { displayContent: displayText } : {}),
         },
       ]);
-      setIsProcessing(true);
-      await window.claude.codex.send(sessionId, text, images, codexEffort);
+      const ok = await sendRaw(text, images);
+      if (!ok) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextId("err"),
+            role: "system",
+            content: "Unable to send message.",
+            timestamp: Date.now(),
+            isError: true,
+          },
+        ]);
+      }
+      return ok;
     },
-    [sessionId, codexEffort],
+    [sessionId, sendRaw],
   );
-
-  const sendRaw = send; // Codex doesn't differentiate
 
   const stop = useCallback(async () => {
     if (!sessionId) return;

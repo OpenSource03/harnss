@@ -5,7 +5,7 @@
  * Each item type maps to a UIMessage role + toolName for the existing ToolCall UI.
  */
 
-import type { TodoItem, ModelInfo } from "@/types";
+import type { TodoItem, ModelInfo, ImageAttachment } from "@/types";
 import type { CodexThreadItem } from "@/types/codex";
 import type { Model as CodexModel } from "@/types/codex-protocol/v2/Model";
 
@@ -166,11 +166,14 @@ export function codexPlanToTodos(
 ): TodoItem[] {
   return planSteps.map((s) => ({
     content: s.step,
-    status: s.status === "completed"
-      ? "completed"
-      : s.status === "inProgress"
-        ? "in_progress"
-        : "pending",
+    status: (() => {
+      const normalized = s.status.trim().toLowerCase();
+      if (normalized === "completed") return "completed";
+      if (normalized === "inprogress" || normalized === "in_progress" || normalized === "in-progress") {
+        return "in_progress";
+      }
+      return "pending";
+    })(),
   }));
 }
 
@@ -195,5 +198,20 @@ export function codexModelsToModelInfo(models: CodexModel[]): ModelInfo[] {
     value: m.id,
     displayName: m.displayName,
     description: m.description ?? "",
+  }));
+}
+
+export type CodexImageInput =
+  | { type: "image"; url: string }
+  | { type: "localImage"; path: string };
+
+/** Convert UI image attachments to Codex turn/start image inputs. */
+export function imageAttachmentsToCodexInputs(
+  images?: ImageAttachment[],
+): CodexImageInput[] | undefined {
+  if (!images || images.length === 0) return undefined;
+  return images.map((img) => ({
+    type: "image",
+    url: `data:${img.mediaType};base64,${img.data}`,
   }));
 }

@@ -23,6 +23,8 @@ interface SessionListItem {
   engine?: EngineId;
 }
 
+type CodexImageInput = { type: "image"; url: string } | { type: "localImage"; path: string };
+
 declare global {
   interface Window {
     claude: {
@@ -202,7 +204,7 @@ declare global {
             needsAuth?: boolean;
             error?: string;
           }>;
-        send: (sessionId: string, text: string, images?: unknown[], effort?: string) =>
+        send: (sessionId: string, text: string, images?: CodexImageInput[], effort?: string) =>
           Promise<{ turnId?: string; error?: string }>;
         stop: (sessionId: string) => Promise<void>;
         interrupt: (sessionId: string) => Promise<{ error?: string }>;
@@ -211,7 +213,7 @@ declare global {
         compact: (sessionId: string) => Promise<{ error?: string }>;
         listModels: () => Promise<{ models: CodexModel[]; error?: string }>;
         authStatus: () => Promise<{ account: unknown; requiresOpenaiAuth: boolean }>;
-        login: (sessionId: string, type: string, apiKey?: string) => Promise<unknown>;
+        login: (sessionId: string, type: "apiKey" | "chatgpt", apiKey?: string) => Promise<unknown>;
         resume: (options: { cwd: string; threadId: string; model?: string }) =>
           Promise<{ sessionId?: string; threadId?: string; error?: string }>;
         setModel: (sessionId: string, model: string) => Promise<{ error?: string }>;

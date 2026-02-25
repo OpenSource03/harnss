@@ -13,61 +13,73 @@
 ---
 
 > [!WARNING]
-> This project is in active development. Expect bugs, breaking changes, and missing features. Documentation is not available yet — check back soon.
+> This project is in active development. Expect bugs, breaking changes, and missing features.
 
-Stop juggling terminals. OpenACP UI is a native desktop app that puts your AI coding agents, tools, and context in one window — with a UI that actually helps you work.
+OpenACP UI is a native desktop app for running and managing AI coding agents. It supports multiple concurrent sessions across three first-class engines — Claude Code, Codex, and any ACP-compatible agent — with a unified interface for tools, context, and project workflows.
 
 ## Features
 
-**Run multiple agents side by side** — Claude Code, ACP agents, and any compatible backend. Each session runs independently with its own state, history, and context. Switch between them instantly.
+**Multi-engine sessions** — Run Claude Code (via the Anthropic SDK), Codex, and ACP-compatible agents side by side. Each session runs independently with its own state, history, and context. Switch between them instantly without losing progress.
 
-**See what tools are doing** — Every tool call renders as a rich interactive card. File edits show word-level diffs with syntax highlighting. Bash output appears inline. Subagent tasks nest with step-by-step progress tracking.
+**Rich tool visualization** — Every tool call renders as an interactive card. File edits show word-level diffs with syntax highlighting. Bash output appears inline. Subagent tasks nest with step-by-step progress tracking. File changes are summarized per turn with a dedicated Changes panel for both per-turn and cumulative views.
 
-**Connect any MCP server** — Plug in external tools via the Model Context Protocol. Jira issues, Confluence pages, and other integrations render with dedicated UIs — not raw JSON. OAuth flows handled automatically.
+**MCP server management** — Connect any MCP server per project via stdio, SSE, or HTTP transport. OAuth flows are handled automatically. Server status and available tool counts are visible at a glance. Reconnect or re-authenticate without restarting your session. Jira, Confluence, and other integrations render with dedicated UIs rather than raw JSON.
 
-**Built-in terminal and browser** — Full PTY terminal with multiple tabs right next to your chat. Open web pages in an embedded browser without switching windows.
+**Git integration** — Stage, unstage, commit, and push without leaving the app. Browse branches, view commit history, and manage git worktrees. AI-generated commit messages are available from the staged diff.
 
-**Project workspaces** — Each project maps to a folder on disk. Sessions, history, and settings stay organized per project. Git status, staging, commits, and branches built into the sidebar.
+**Built-in terminal and browser** — Multi-tab PTY terminal backed by native shell processes. An embedded browser for opening URLs inline. Both panels stay mounted while you work.
 
-**Thinking mode** — Watch Claude reason through problems in collapsible thinking blocks before it acts.
+**Project workspaces and spaces** — Projects map to folders on disk. Spaces let you organize projects into named groups with custom icons and colors. Sessions, history, and panel settings are all scoped per project.
 
-**Glass UI on macOS** — Native liquid glass transparency on macOS Tahoe+. Looks sharp on every other platform too.
+**Agent Store** — Browse and install agents from the ACP community registry directly in the app. Add custom agents by specifying a command, arguments, environment variables, and an icon. All agent configuration is managed through Settings — no config file editing required.
 
-## Supported Agents
+**Thinking mode** — Watch Claude reason through problems in collapsible thinking blocks before it acts. Toggle extended reasoning per session.
 
-OpenACP UI works with any CLI that speaks the [Agent Client Protocol](https://agentclientprotocol.com). Each agent needs to be installed and authenticated separately. See the full [ACP Agent Registry](https://agentclientprotocol.com/get-started/registry) for all supported agents.
+**Session search and history** — Full-text search across session titles and message content. Import and resume conversations previously started in the Claude Code CLI.
+
+**Notifications and voice input** — Configurable OS notifications for key events: plan approval requests, permission prompts, questions from the agent, and session completion. Voice input via native macOS dictation or an on-device Whisper model (no API key required).
+
+**Auto-updates** — The app checks for new releases on launch and shows a banner when an update is ready to install. Pre-release builds can be opted into in Settings.
+
+## Engines & Agents
+
+OpenACP UI supports three execution engines:
+
+| Engine | Protocol | Requirements |
+|--------|----------|--------------|
+| **Claude Code** | Anthropic Agent SDK | Anthropic API key |
+| **Codex** | JSON-RPC app-server | Codex CLI in PATH + OpenAI API key or ChatGPT account |
+| **ACP agents** | Agent Client Protocol | Agent-specific (see registry) |
+
+Claude Code and Codex are built-in — no command configuration needed. ACP agents can be installed from the [ACP Agent Registry](https://agentclientprotocol.com/get-started/registry) inside the app, or configured manually.
+
+**Examples of installable ACP-compatible agents:**
 
 | Agent | Command | Notes |
 |-------|---------|-------|
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `npx @zed-industries/claude-code-acp` | Native support, permission modes |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini --experimental-acp` | Experimental ACP flag |
-| [Codex CLI](https://github.com/openai/codex) | `codex acp` | Requires `OPENAI_API_KEY` |
 | [Goose](https://github.com/block/goose) | `goose acp` | |
 | [Docker cagent](https://github.com/docker/cagent) | `cagent acp agent.yml` | Container-based agents |
 
 ### Adding an agent
 
-Agents are configured in `agents.json` at your app data directory. Each entry defines the command, args, and environment:
+Open **Settings → ACP Agents**. The **Agent Store** tab lets you browse and install agents from the community registry with one click. The **My Agents** tab lets you create and manage custom agents — set the binary command, arguments, environment variables, and icon, or paste a JSON definition from your clipboard to auto-fill the form.
 
-```json
-{
-  "Claude Code": {
-    "command": "npx",
-    "args": ["@zed-industries/claude-code-acp"],
-    "env": { "ACP_PERMISSION_MODE": "acceptEdits" }
-  }
-}
-```
+## MCP Servers
 
-You can also add agents directly from the app sidebar.
+MCP servers are configured per project through the **MCP Servers panel** in the right-side toolbar. Supported transports: stdio, SSE, and HTTP. OAuth authentication is handled in-app with token persistence across sessions.
 
 ## Install
+
+> [!NOTE]
+> Pre-built binaries are currently **unsigned**. On macOS, right-click the app and choose **Open** to bypass the Gatekeeper warning on first launch. On Windows, click **More info → Run anyway** if Windows Defender flags the installer. If the project grows to support it through community donations, code signing certificates will be purchased for all platforms.
 
 | Platform | Download |
 |----------|----------|
 | macOS (Apple Silicon) | [`.dmg` (arm64)](https://github.com/OpenSource03/openacpui/releases/latest) |
 | macOS (Intel) | [`.dmg` (x64)](https://github.com/OpenSource03/openacpui/releases/latest) |
-| Windows | [`.exe` installer](https://github.com/OpenSource03/openacpui/releases/latest) |
+| Windows (x64) | [`.exe` installer](https://github.com/OpenSource03/openacpui/releases/latest) |
+| Windows (ARM64) | [`.exe` installer](https://github.com/OpenSource03/openacpui/releases/latest) |
 | Linux | [`.AppImage`](https://github.com/OpenSource03/openacpui/releases/latest) / [`.deb`](https://github.com/OpenSource03/openacpui/releases/latest) |
 
 ## Development
@@ -83,7 +95,7 @@ pnpm dev
 
 ```bash
 pnpm dist:mac      # macOS DMG (arm64 + x64)
-pnpm dist:win      # Windows NSIS installer
+pnpm dist:win      # Windows NSIS installer (x64 + ARM64)
 pnpm dist:linux    # Linux AppImage + deb
 ```
 

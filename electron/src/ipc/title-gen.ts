@@ -12,7 +12,7 @@ export function register(): void {
   }: {
     message: string;
     cwd?: string;
-    engine?: "claude" | "acp";
+    engine?: "claude" | "acp" | "codex";
     sessionId?: string; // ACP internalId when engine === "acp"
   }) => {
     const truncatedMsg = message.length > 500 ? message.slice(0, 500) + "..." : message;
@@ -88,7 +88,7 @@ export function register(): void {
     sessionId,
   }: {
     cwd: string;
-    engine?: "claude" | "acp";
+    engine?: "claude" | "acp" | "codex";
     sessionId?: string; // ACP internalId when engine === "acp"
   }) => {
     try {

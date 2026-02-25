@@ -163,7 +163,7 @@ contextBridge.exposeInMainWorld("claude", {
   codex: {
     start: (options: { cwd: string; model?: string; approvalPolicy?: string; personality?: string }) =>
       ipcRenderer.invoke("codex:start", options),
-    send: (sessionId: string, text: string, images?: unknown[], effort?: string) =>
+    send: (sessionId: string, text: string, images?: Array<{ type: "image"; url: string } | { type: "localImage"; path: string }>, effort?: string) =>
       ipcRenderer.invoke("codex:send", { sessionId, text, images, effort }),
     stop: (sessionId: string) => ipcRenderer.invoke("codex:stop", sessionId),
     interrupt: (sessionId: string) => ipcRenderer.invoke("codex:interrupt", sessionId),
@@ -172,7 +172,7 @@ contextBridge.exposeInMainWorld("claude", {
     compact: (sessionId: string) => ipcRenderer.invoke("codex:compact", sessionId),
     listModels: () => ipcRenderer.invoke("codex:list-models"),
     authStatus: () => ipcRenderer.invoke("codex:auth-status"),
-    login: (sessionId: string, type: string, apiKey?: string) =>
+    login: (sessionId: string, type: "apiKey" | "chatgpt", apiKey?: string) =>
       ipcRenderer.invoke("codex:login", { sessionId, type, apiKey }),
     resume: (options: { cwd: string; threadId: string; model?: string }) =>
       ipcRenderer.invoke("codex:resume", options),

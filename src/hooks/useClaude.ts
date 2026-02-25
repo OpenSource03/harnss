@@ -906,6 +906,7 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
     messages,
     setMessages,
     isProcessing,
+    setIsProcessing,
     isConnected,
     setIsConnected,
     sessionInfo,

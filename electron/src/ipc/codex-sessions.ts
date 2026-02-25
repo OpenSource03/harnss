@@ -6,7 +6,7 @@
  * notifications to the renderer, and bridge approval requests.
  */
 
-import { BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { spawn } from "child_process";
 import crypto from "crypto";
 import { log } from "../lib/logger";
@@ -28,11 +28,13 @@ interface CodexSession {
 }
 
 const codexSessions = new Map<string, CodexSession>();
-const APP_SERVER_CLIENT_INFO = {
-  name: "openacpui",
-  title: "OpenACP UI",
-  version: "0.1.0", // TODO: read from package.json
-};
+function getAppServerClientInfo(): { name: string; title: string; version: string } {
+  return {
+    name: "openacpui",
+    title: "OpenACP UI",
+    version: app.getVersion(),
+  };
+}
 
 /** Extract a user-friendly error message from unknown error values. */
 function errorMessage(err: unknown): string {
@@ -170,7 +172,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
 
         // ── Initialize handshake ──
         const initResult = await rpc.request("initialize", {
-          clientInfo: APP_SERVER_CLIENT_INFO,
+          clientInfo: getAppServerClientInfo(),
           capabilities: {
             experimentalApi: true,
           },
@@ -388,7 +390,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
       const rpc = new CodexRpcClient(proc);
       try {
         await rpc.request("initialize", {
-          clientInfo: APP_SERVER_CLIENT_INFO,
+          clientInfo: getAppServerClientInfo(),
           capabilities: { experimentalApi: true },
         });
         rpc.notify("initialized", {});
@@ -523,7 +525,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
 
         // Initialize
         await rpc.request("initialize", {
-          clientInfo: APP_SERVER_CLIENT_INFO,
+          clientInfo: getAppServerClientInfo(),
           capabilities: { experimentalApi: true },
         });
         rpc.notify("initialized", {});
