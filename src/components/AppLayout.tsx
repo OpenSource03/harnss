@@ -43,9 +43,10 @@ export function AppLayout() {
 
   // Derive activeProjectId early so useSettings can scope per-project
   const activeProjectId = manager.activeSession?.projectId ?? manager.draftProjectId;
-  const activeProjectPath = projectManager.projects.find((p) => p.id === activeProjectId)?.path;
+  const activeProject = projectManager.projects.find((p) => p.id === activeProjectId);
 
   const settings = useSettings(activeProjectId ?? null);
+  const activeProjectPath = settings.gitCwd ?? activeProject?.path;
   const { agents, refresh: refreshAgents, saveAgent, deleteAgent } = useAgentRegistry();
 
   const [selectedAgent, setSelectedAgent] = useState<AgentDefinition | null>(null);
@@ -1071,6 +1072,10 @@ export function AppLayout() {
                       cwd={activeProjectPath}
                       collapsedRepos={settings.collapsedRepos}
                       onToggleRepoCollapsed={settings.toggleRepoCollapsed}
+                      selectedWorktreePath={activeProjectPath}
+                      onSelectWorktreePath={settings.setGitCwd}
+                      activeEngine={manager.activeSession?.engine}
+                      activeSessionId={manager.activeSessionId}
                     />
                   ),
                   browser: <BrowserPanel />,

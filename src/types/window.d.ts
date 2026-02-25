@@ -52,6 +52,8 @@ declare global {
       generateTitle: (
         message: string,
         cwd?: string,
+        engine?: "claude" | "acp",
+        sessionId?: string,
       ) => Promise<{ title?: string; error?: string }>;
       log: (label: string, data: unknown) => void;
       onEvent: (callback: (event: ClaudeEvent & { _sessionId: string }) => void) => () => void;
@@ -139,12 +141,19 @@ declare global {
         branches: (cwd: string) => Promise<GitBranch[] & { error?: string }>;
         checkout: (cwd: string, branch: string) => Promise<{ ok?: boolean; error?: string }>;
         createBranch: (cwd: string, name: string) => Promise<{ ok?: boolean; error?: string }>;
+        createWorktree: (cwd: string, path: string, branch: string, fromRef?: string) => Promise<{ ok?: boolean; path?: string; output?: string; error?: string }>;
+        removeWorktree: (cwd: string, path: string, force?: boolean) => Promise<{ ok?: boolean; output?: string; error?: string }>;
+        pruneWorktrees: (cwd: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
         push: (cwd: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
         pull: (cwd: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
         fetch: (cwd: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
         diffFile: (cwd: string, file: string, staged: boolean) => Promise<{ diff?: string; error?: string }>;
         log: (cwd: string, count?: number) => Promise<GitLogEntry[]>;
-        generateCommitMessage: (cwd: string) => Promise<{ message?: string; error?: string }>;
+        generateCommitMessage: (
+          cwd: string,
+          engine?: "claude" | "acp",
+          sessionId?: string,
+        ) => Promise<{ message?: string; error?: string }>;
       };
       terminal: {
         create: (options: { cwd?: string; cols?: number; rows?: number }) => Promise<{ terminalId?: string; error?: string }>;

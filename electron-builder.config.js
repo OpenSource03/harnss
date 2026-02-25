@@ -89,7 +89,6 @@ module.exports = {
   asarUnpack: [
     "node_modules/node-pty/**",
     "node_modules/electron-liquid-glass/**",
-    "node_modules/mica-electron/**",
     "node_modules/@anthropic-ai/claude-agent-sdk/cli.js",
     "node_modules/@anthropic-ai/claude-agent-sdk/*.wasm",
     "node_modules/@anthropic-ai/claude-agent-sdk/vendor/**",
@@ -115,9 +114,6 @@ module.exports = {
     extendInfo: {
       NSMicrophoneUsageDescription: "OpenACP UI uses the microphone for voice dictation to transcribe speech into text.",
     },
-    files: [
-      "!node_modules/mica-electron/**",
-    ],
   },
 
   dmg: {
@@ -140,9 +136,6 @@ module.exports = {
       "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-linux/**",
       "!node_modules/node-pty/prebuilds/darwin-*/**",
       "!node_modules/node-pty/prebuilds/linux-*/**",
-      // Keep both mica-electron arch binaries — each NSIS package includes both
-      // (~2 MB overhead) and the module picks the right one at runtime
-      "!node_modules/mica-electron/src/micaElectron_ia32.node",
     ],
   },
 
@@ -158,14 +151,13 @@ module.exports = {
   // --- Linux ---
   linux: {
     target: [
-      { target: "AppImage", arch: ["x64"] },
-      { target: "deb", arch: ["x64"] },
+      { target: "AppImage", arch: ["x64", "arm64"] },
+      { target: "deb", arch: ["x64", "arm64"] },
     ],
     category: "Development",
     icon: "build/icon.png",
     files: [
       "!node_modules/electron-liquid-glass/**",
-      "!node_modules/mica-electron/**",
       "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-darwin/**",
       "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-darwin/**",
       "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-win32/**",

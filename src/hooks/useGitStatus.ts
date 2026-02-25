@@ -166,6 +166,33 @@ export function useGitStatus({ projectPath }: UseGitStatusOptions) {
     [refreshRepo],
   );
 
+  const createWorktree = useCallback(
+    async (repoPath: string, worktreePath: string, branch: string, fromRef?: string) => {
+      const result = await window.claude.git.createWorktree(repoPath, worktreePath, branch, fromRef);
+      if (!result.error) await refreshAll();
+      return result;
+    },
+    [refreshAll],
+  );
+
+  const removeWorktree = useCallback(
+    async (repoPath: string, worktreePath: string, force?: boolean) => {
+      const result = await window.claude.git.removeWorktree(repoPath, worktreePath, force);
+      if (!result.error) await refreshAll();
+      return result;
+    },
+    [refreshAll],
+  );
+
+  const pruneWorktrees = useCallback(
+    async (repoPath: string) => {
+      const result = await window.claude.git.pruneWorktrees(repoPath);
+      if (!result.error) await refreshAll();
+      return result;
+    },
+    [refreshAll],
+  );
+
   const push = useCallback(
     async (repoPath: string) => {
       const result = await window.claude.git.push(repoPath);
@@ -213,6 +240,9 @@ export function useGitStatus({ projectPath }: UseGitStatusOptions) {
     commit,
     checkout,
     createBranch,
+    createWorktree,
+    removeWorktree,
+    pruneWorktrees,
     push,
     pull,
     fetchRemote,

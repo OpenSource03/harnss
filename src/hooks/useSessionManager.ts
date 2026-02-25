@@ -152,6 +152,11 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     return projectsRef.current.find((p) => p.id === projectId) ?? null;
   }, []);
 
+  const getProjectCwd = useCallback((project: Project) => {
+    const selected = localStorage.getItem(`openacpui-${project.id}-git-cwd`)?.trim();
+    return selected || project.path;
+  }, []);
+
   // Eagerly start a Claude SDK session for immediate MCP status display
   const eagerStartSession = useCallback(async (projectId: string, options?: StartOptions) => {
     const project = projectsRef.current.find((p) => p.id === projectId);
@@ -160,7 +165,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     let result;
     try {
       result = await window.claude.start({
-        cwd: project.path,
+        cwd: getProjectCwd(project),
         model: options?.model,
         permissionMode: options?.permissionMode,
         mcpServers,
@@ -277,7 +282,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
 
     const result = await window.claude.acp.start({
       agentId,
-      cwd: project.path,
+      cwd: getProjectCwd(project),
       mcpServers: servers,
     });
     if (result.error || !result.sessionId) {
@@ -452,9 +457,9 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     }).catch(() => { /* IPC failure — leave sessions empty */ });
   }, [projects]);
 
-  // AI-generated title via background Haiku instance
+  // AI-generated title via background utility prompt (SDK Haiku or ACP utility session)
   const generateSessionTitle = useCallback(
-    async (sessionId: string, message: string, projectPath: string) => {
+    async (sessionId: string, message: string, projectPath: string, engine?: "claude" | "acp") => {
       setSessions((prev) =>
         prev.map((s) =>
           s.id === sessionId ? { ...s, titleGenerating: true } : s,
@@ -465,7 +470,13 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
         message.length > 60 ? message.slice(0, 57) + "..." : message;
 
       try {
-        const result = await window.claude.generateTitle(message, projectPath);
+        // Pass engine + sessionId so the IPC handler routes to ACP if needed
+        const result = await window.claude.generateTitle(
+          message,
+          projectPath,
+          engine,
+          engine === "acp" ? sessionId : undefined,
+        );
 
         // Guard: session may have been deleted or manually renamed while generating
         const current = sessionsRef.current.find((s) => s.id === sessionId);
@@ -768,7 +779,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
       }
       const options = startOptionsRef.current;
       const draftEngine = options.engine ?? "claude";
-      console.log("[materializeDraft] engine=%s agentId=%s project=%s", draftEngine, options.agentId, project.path);
+      console.log("[materializeDraft] engine=%s agentId=%s project=%s", draftEngine, options.agentId, getProjectCwd(project));
 
       let sessionId: string;
       let reusedPreStarted = false;
@@ -794,7 +805,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
         console.log("[materializeDraft] Calling acp:start...");
         const result = await window.claude.acp.start({
           agentId: options.agentId,
-          cwd: project.path,
+          cwd: getProjectCwd(project),
           mcpServers,
         });
         console.log("[materializeDraft] acp:start result:", result);
@@ -894,7 +905,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
           let result;
           try {
             result = await window.claude.start({
-              cwd: project.path,
+              cwd: getProjectCwd(project),
               model: options.model,
               permissionMode: options.permissionMode,
               mcpServers,
@@ -965,8 +976,8 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
       // Refresh MCP status since useClaude may have missed the system init event
       setTimeout(() => { claude.refreshMcpStatus(); }, 500);
 
-      // Fire-and-forget AI title generation
-      generateSessionTitle(sessionId, text, project.path);
+      // Fire-and-forget AI title generation — routes through ACP if that's the active engine
+      generateSessionTitle(sessionId, text, getProjectCwd(project), draftEngine);
 
       materializingRef.current = false;
       return sessionId;
@@ -1178,7 +1189,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
       await saveCurrentSession();
       seedBackgroundStore();
 
-      const result = await window.claude.ccSessions.import(project.path, ccSessionId);
+      const result = await window.claude.ccSessions.import(getProjectCwd(project), ccSessionId);
       if (result.error || !result.messages) return;
 
       const firstUserMsg = result.messages.find((m) => m.role === "user");
@@ -1258,7 +1269,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
       const mcpServers = await window.claude.mcp.list(session.projectId);
       const result = await window.claude.acp.reviveSession({
         agentId: session.agentId,
-        cwd: project.path,
+        cwd: getProjectCwd(project),
         agentSessionId: session.agentSessionId,
         mcpServers,
       });
@@ -1327,7 +1338,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
       if (!project) return;
 
       const startPayload: StartOptions & { cwd: string; resume?: string } = {
-        cwd: project.path,
+        cwd: getProjectCwd(project),
         ...(session.model ? { model: session.model } : {}),
         permissionMode: startOptionsRef.current.permissionMode,
         resume: oldId, // Resume the SDK session to restore conversation context
@@ -1620,7 +1631,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
     //    with old session's async cleanup which would delete a same-key Map entry).
     const mcpServers = await window.claude.mcp.list(session.projectId);
     const startResult = await window.claude.start({
-      cwd: project.path,
+      cwd: getProjectCwd(project),
       model: session.model,
       permissionMode: startOptionsRef.current.permissionMode,
       resume: currentId,

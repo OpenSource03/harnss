@@ -316,6 +316,8 @@ export interface GitRepoInfo {
   path: string;
   name: string;
   isSubRepo: boolean;
+  isWorktree: boolean;
+  isPrimaryWorktree: boolean;
 }
 
 export interface GitStatus {

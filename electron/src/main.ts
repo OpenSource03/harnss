@@ -63,10 +63,8 @@ function createWindow(): void {
     height: 800,
     minWidth: 1280,
     minHeight: 600,
-    // build/ isn't in the asar (buildResources only); use dist/ (Vite output) in production
-    icon: app.isPackaged
-      ? path.join(__dirname, "../../dist/icon.png")
-      : path.join(__dirname, "../../build/icon.png"),
+    // Packaged builds get the icon from the .app bundle / electron-builder config
+    ...(!app.isPackaged && { icon: path.join(__dirname, "../../build/icon.png") }),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -260,11 +258,8 @@ app.whenReady().then(() => {
   );
 
   // Set dock icon in dev mode — packaged builds get it from the .app bundle
-  if (process.platform === "darwin" && app.dock) {
-    const dockIcon = app.isPackaged
-      ? path.join(__dirname, "../../dist/icon.png")
-      : path.join(__dirname, "../../build/icon.png");
-    app.dock.setIcon(dockIcon);
+  if (!app.isPackaged && process.platform === "darwin" && app.dock) {
+    app.dock.setIcon(path.join(__dirname, "../../build/icon.png"));
   }
 
   const shortcuts = ["CommandOrControl+Alt+I", "F12", "CommandOrControl+Shift+J"];

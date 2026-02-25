@@ -1,10 +1,11 @@
-import { Minus, Loader2 } from "lucide-react";
+import { Minus } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { useState, useRef, useEffect, useCallback } from "react";
+import { TextShimmer } from "@/components/ui/text-shimmer";
 
 interface ThinkingBlockProps {
   thinking: string;
@@ -112,27 +113,30 @@ export function ThinkingBlock({ thinking, isStreaming, thinkingComplete }: Think
   return (
     <Collapsible open={open} onOpenChange={handleOpenChange} className="mb-2">
       <CollapsibleTrigger className="flex items-center gap-1.5 py-1 text-xs text-foreground/40 hover:text-foreground/70 transition-colors">
+        <Minus className={`h-3 w-3 ${isThinking ? "text-foreground/40" : "text-foreground/30"}`} />
         {isThinking ? (
-          <Loader2 className="h-3 w-3 animate-spin text-foreground/40" />
+          <TextShimmer as="span" className="italic opacity-60" duration={1.8} spread={1.5}>
+            Thinking...
+          </TextShimmer>
         ) : (
-          <Minus className="h-3 w-3 text-foreground/30" />
+          <span className="italic text-foreground/40">Thought</span>
         )}
-        <span className="italic">
-          {isThinking ? "Thinking..." : "Thought"}
-        </span>
       </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div
-          ref={contentRef}
-          onScroll={handleScroll}
-          className="mt-1 max-h-60 overflow-auto border-s-2 border-foreground/10 ps-3 py-1 text-xs text-foreground/40 whitespace-pre-wrap"
-        >
-          {baseText}
-          {animatedChunks.map((chunk) => (
-            <span key={chunk.id} className="stream-chunk-enter">{chunk.text}</span>
-          ))}
-        </div>
-      </CollapsibleContent>
+      {/* Only render expandable content when there's actual thinking text */}
+      {thinking.length > 0 && (
+        <CollapsibleContent>
+          <div
+            ref={contentRef}
+            onScroll={handleScroll}
+            className="mt-1 max-h-60 overflow-auto border-s-2 border-foreground/10 ps-3 py-1 text-xs text-foreground/40 whitespace-pre-wrap"
+          >
+            {baseText}
+            {animatedChunks.map((chunk) => (
+              <span key={chunk.id} className="stream-chunk-enter">{chunk.text}</span>
+            ))}
+          </div>
+        </CollapsibleContent>
+      )}
     </Collapsible>
   );
 }

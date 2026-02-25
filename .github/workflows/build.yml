@@ -152,13 +152,13 @@ jobs:
       - name: Build app
         run: pnpm build
 
-      - name: Package (linux-x64)
+      - name: Package (linux x64 + arm64)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
           pnpm exec electron-builder
           --linux
-          --x64
+          --x64 --arm64
           --config electron-builder.config.js
           --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
 

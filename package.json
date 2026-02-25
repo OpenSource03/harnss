@@ -33,7 +33,7 @@
     "@modelcontextprotocol/sdk": "^1.26.0",
     "electron-liquid-glass": "^1.1.1",
     "electron-updater": "^6.8.3",
-    "mica-electron": "^1.5.16",
+    "motion": "^12.34.3",
     "node-pty": "^1.1.0",
     "sonner": "^2.0.7"
   },

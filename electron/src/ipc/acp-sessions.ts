@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain } from "electron";
 import { spawn, ChildProcess } from "child_process";
 import { Readable, Writable } from "stream";
 import crypto from "crypto";
+import path from "path";
 import { log } from "../lib/logger";
 import { safeSend } from "../lib/safe-send";
 import { getAgent } from "../lib/agent-registry";
@@ -35,6 +36,54 @@ function errorMessage(err: unknown): string {
   return String(err);
 }
 
+type ACPTextFileParams = { path?: string; uri?: string; content?: string };
+type ACPReadTextFileParams = ACPTextFileParams & { line?: number | null; limit?: number | null };
+type ACPWriteTextFileParams = ACPTextFileParams & { content: string };
+
+function resolveACPFilePath(params: ACPTextFileParams): string {
+  const filePath = params.path ?? params.uri;
+  if (!filePath) throw new Error("ACP fs request is missing path");
+  return filePath;
+}
+
+function normalizePositiveInt(value: number | null | undefined, fallback: number): number {
+  if (value == null || Number.isNaN(value)) return fallback;
+  const n = Math.trunc(value);
+  return n > 0 ? n : fallback;
+}
+
+function applyReadRange(content: string, line?: number | null, limit?: number | null): string {
+  if (line == null && limit == null) return content;
+  const lines = content.match(/[^\n]*\n|[^\n]+/g) ?? [];
+  const startLine = normalizePositiveInt(line, 1);
+  const startIndex = startLine - 1;
+  const lineLimit = limit == null ? Number.MAX_SAFE_INTEGER : Math.max(0, Math.trunc(limit));
+  if (startIndex >= lines.length || lineLimit === 0) return "";
+  return lines.slice(startIndex, startIndex + lineLimit).join("");
+}
+
+async function acpReadTextFile(params: ACPReadTextFileParams): Promise<{ content: string; filePath: string }> {
+  const filePath = resolveACPFilePath(params);
+  const fs = await import("fs/promises");
+  const content = await fs.readFile(filePath, "utf-8");
+  return { filePath, content: applyReadRange(content, params.line, params.limit) };
+}
+
+async function acpWriteTextFile(params: ACPWriteTextFileParams): Promise<{ filePath: string }> {
+  const filePath = resolveACPFilePath(params);
+  const fs = await import("fs/promises");
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, params.content, "utf-8");
+  return { filePath };
+}
+
+// Advertise only capabilities that are fully implemented here.
+// Intentionally omit `terminal` and any custom `_meta` flags (e.g. terminal_output)
+// so ACP agents use their protocol fallbacks instead of unsupported client RPC paths.
+const ACP_CLIENT_CAPABILITIES = {
+  fs: { readTextFile: true, writeTextFile: true },
+} as const;
+
 interface ACPSessionEntry {
   process: ChildProcess;
   connection: unknown; // ClientSideConnection — typed as unknown to avoid top-level ESM import
@@ -46,6 +95,10 @@ interface ACPSessionEntry {
   supportsLoadSession: boolean;
   /** True while session/load is in-flight — suppresses history replay notifications from reaching the renderer */
   isReloading: boolean;
+  /** ACP-side session IDs for ephemeral utility prompts (title gen, commit msg) */
+  utilitySessionIds?: Set<string>;
+  /** Text accumulator buffers for utility sessions, keyed by ACP sessionId */
+  utilityTextBuffers?: Map<string, string>;
 }
 
 export const acpSessions = new Map<string, ACPSessionEntry>();
@@ -215,7 +268,22 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
       const connection = new acp.ClientSideConnection((_agent) => ({
         async sessionUpdate(params: Record<string, unknown>) {
           const update = (params as { update: Record<string, unknown> }).update;
+          const acpSessionId = (params as { sessionId: string }).sessionId;
           const entry = acpSessions.get(internalId);
+
+          // Utility session events: accumulate text, skip renderer forwarding
+          if (entry?.utilitySessionIds?.has(acpSessionId)) {
+            const eventKind = (update as { sessionUpdate: string }).sessionUpdate;
+            if (eventKind === "agent_message_chunk") {
+              const text = (update as { content?: { text?: string } }).content?.text ?? "";
+              if (text && entry.utilityTextBuffers) {
+                const current = entry.utilityTextBuffers.get(acpSessionId) ?? "";
+                entry.utilityTextBuffers.set(acpSessionId, current + text);
+              }
+            }
+            return;
+          }
+
           if (entry) entry.eventCounter++;
           const count = entry?.eventCounter ?? 0;
           const summary = summarizeUpdate(update);
@@ -241,12 +309,23 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
 
           safeSend(getMainWindow,"acp:event", {
             _sessionId: internalId,
-            sessionId: (params as { sessionId: string }).sessionId,
+            sessionId: acpSessionId,
             update,
           });
         },
 
         async requestPermission(params: Record<string, unknown>) {
+          const acpSessionId = (params as { sessionId: string }).sessionId;
+          const entry = acpSessions.get(internalId);
+
+          // Auto-deny permission requests for utility sessions (text-only prompts)
+          if (entry?.utilitySessionIds?.has(acpSessionId)) {
+            log("ACP_UTILITY", `Auto-denying permission for utility session ${acpSessionId.slice(0, 12)}`);
+            const options = (params as { options: Array<{ optionId: string; kind: string }> }).options;
+            const rejectOption = options.find(o => o.kind === "reject_once") ?? options[options.length - 1];
+            return { outcome: { outcome: "selected", optionId: rejectOption?.optionId ?? "reject" } };
+          }
+
           return new Promise((resolve) => {
             const requestId = crypto.randomUUID();
             const toolCall = (params as { toolCall: Record<string, unknown> }).toolCall;
@@ -272,17 +351,15 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
           });
         },
 
-        async readTextFile(params: { uri: string }) {
-          log("ACP_FS", `readTextFile uri=${params.uri}`);
-          const fs = await import("fs/promises");
-          const content = await fs.readFile(params.uri, "utf-8");
+        async readTextFile(params: { path?: string; uri?: string; line?: number | null; limit?: number | null }) {
+          const { filePath, content } = await acpReadTextFile(params);
+          log("ACP_FS", `readTextFile path=${filePath} line=${params.line ?? ""} limit=${params.limit ?? ""}`);
           log("ACP_FS", `readTextFile result len=${content.length}`);
           return { content };
         },
-        async writeTextFile(params: { uri: string; content: string }) {
-          log("ACP_FS", `writeTextFile uri=${params.uri} len=${params.content.length}`);
-          const fs = await import("fs/promises");
-          await fs.writeFile(params.uri, params.content, "utf-8");
+        async writeTextFile(params: { path?: string; uri?: string; content: string }) {
+          const { filePath } = await acpWriteTextFile(params);
+          log("ACP_FS", `writeTextFile path=${filePath} len=${params.content.length}`);
           return {};
         },
       }), stream);
@@ -290,9 +367,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
       log("ACP_SPAWN", `Initializing protocol...`);
       const initResult = await connection.initialize({
         protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: {
-          fs: { readTextFile: true, writeTextFile: true },
-        },
+        clientCapabilities: ACP_CLIENT_CAPABILITIES,
       });
       const caps = (initResult as { agentCapabilities?: { loadSession?: boolean } }).agentCapabilities;
       const supportsLoadSession = caps?.loadSession === true;
@@ -464,17 +539,43 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
 
       const connection = new acp.ClientSideConnection((_agent) => ({
         async sessionUpdate(params: Record<string, unknown>) {
-          const entry = acpSessions.get(internalId);
-          if (entry) entry.eventCounter++;
           const update = (params as { update: Record<string, unknown> }).update;
+          const acpSessionId = (params as { sessionId: string }).sessionId;
+          const entry = acpSessions.get(internalId);
+
+          // Utility session events: accumulate text, skip renderer forwarding
+          if (entry?.utilitySessionIds?.has(acpSessionId)) {
+            const eventKind = (update as { sessionUpdate: string }).sessionUpdate;
+            if (eventKind === "agent_message_chunk") {
+              const text = (update as { content?: { text?: string } }).content?.text ?? "";
+              if (text && entry.utilityTextBuffers) {
+                const current = entry.utilityTextBuffers.get(acpSessionId) ?? "";
+                entry.utilityTextBuffers.set(acpSessionId, current + text);
+              }
+            }
+            return;
+          }
+
+          if (entry) entry.eventCounter++;
           if (entry?.isReloading) return; // suppress history replay
           safeSend(getMainWindow,"acp:event", {
             _sessionId: internalId,
-            sessionId: (params as { sessionId: string }).sessionId,
+            sessionId: acpSessionId,
             update,
           });
         },
         async requestPermission(params: Record<string, unknown>) {
+          const acpSessionId = (params as { sessionId: string }).sessionId;
+          const entry = acpSessions.get(internalId);
+
+          // Auto-deny permission requests for utility sessions (text-only prompts)
+          if (entry?.utilitySessionIds?.has(acpSessionId)) {
+            log("ACP_UTILITY", `Auto-denying permission for utility session ${acpSessionId.slice(0, 12)}`);
+            const options = (params as { options: Array<{ optionId: string; kind: string }> }).options;
+            const rejectOption = options.find(o => o.kind === "reject_once") ?? options[options.length - 1];
+            return { outcome: { outcome: "selected", optionId: rejectOption?.optionId ?? "reject" } };
+          }
+
           return new Promise((resolve) => {
             const requestId = crypto.randomUUID();
             const toolCall = (params as { toolCall: Record<string, unknown> }).toolCall;
@@ -482,25 +583,24 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
             pendingPermissions.set(requestId, { resolve });
             safeSend(getMainWindow,"acp:permission_request", {
               _sessionId: internalId, requestId,
-              sessionId: (params as { sessionId: string }).sessionId,
+              sessionId: acpSessionId,
               toolCall, options: opts,
             });
           });
         },
-        async readTextFile(params: { uri: string }) {
-          const fs = await import("fs/promises");
-          return { content: await fs.readFile(params.uri, "utf-8") };
+        async readTextFile(params: { path?: string; uri?: string; line?: number | null; limit?: number | null }) {
+          const { content } = await acpReadTextFile(params);
+          return { content };
         },
-        async writeTextFile(params: { uri: string; content: string }) {
-          const fs = await import("fs/promises");
-          await fs.writeFile(params.uri, params.content, "utf-8");
+        async writeTextFile(params: { path?: string; uri?: string; content: string }) {
+          await acpWriteTextFile(params);
           return {};
         },
       }), stream);
 
       const initResult = await connection.initialize({
         protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+        clientCapabilities: ACP_CLIENT_CAPABILITIES,
       });
 
       const caps = (initResult as { agentCapabilities?: { loadSession?: boolean } }).agentCapabilities;

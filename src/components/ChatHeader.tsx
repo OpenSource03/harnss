@@ -1,7 +1,6 @@
 import { memo } from "react";
-import { Loader2, PanelLeft } from "lucide-react";
+import { Info, Loader2, PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isMac } from "@/lib/utils";
 import type { AcpPermissionBehavior } from "@/types";
@@ -44,9 +43,19 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleSidebar,
 }: ChatHeaderProps) {
   const modeLabel = permissionMode ? PERMISSION_MODE_LABELS[permissionMode] : null;
-  const acpBehaviorLabel = acpPermissionBehavior && acpPermissionBehavior !== "ask"
+  const acpBehaviorLabel = acpPermissionBehavior
     ? ACP_PERMISSION_BEHAVIOR_LABELS[acpPermissionBehavior]
     : null;
+  const permissionDisplay = acpBehaviorLabel ?? modeLabel;
+
+  // Collect all session detail rows for the unified tooltip
+  const detailRows: { label: string; value: string }[] = [];
+  if (model) detailRows.push({ label: "Model", value: model });
+  if (permissionDisplay) detailRows.push({ label: "Permissions", value: permissionDisplay });
+  if (totalCost > 0) detailRows.push({ label: "Cost", value: `$${totalCost.toFixed(4)}` });
+  if (sessionId) detailRows.push({ label: "Session", value: sessionId });
+
+  const hasDetails = detailRows.length > 0;
 
   return (
     <div
@@ -65,58 +74,63 @@ export const ChatHeader = memo(function ChatHeader({
         </Button>
       )}
 
+      {/* Processing spinner — left of title, hover shows runtime model + permission mode */}
+      {isProcessing && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="no-drag flex items-center justify-center">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            </span>
+          </TooltipTrigger>
+          {(model || permissionDisplay) && (
+            <TooltipContent side="bottom">
+              <div className="space-y-0.5 text-xs">
+                {model && (
+                  <div className="flex justify-between gap-4">
+                    <span className="opacity-70">Model</span>
+                    <span className="font-mono">{model}</span>
+                  </div>
+                )}
+                {permissionDisplay && (
+                  <div className="flex justify-between gap-4">
+                    <span className="opacity-70">Permissions</span>
+                    <span className="font-mono">{permissionDisplay}</span>
+                  </div>
+                )}
+              </div>
+            </TooltipContent>
+          )}
+        </Tooltip>
+      )}
+
       {title && title !== "New Chat" && (
         <span className="no-drag truncate text-sm font-medium text-foreground/80">
           {title}
         </span>
       )}
 
-      {isProcessing && (
-        <span className="no-drag flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Processing
-        </span>
-      )}
-
-      {model && (
-        <Badge variant="secondary" className="no-drag text-[11px] font-normal">
-          {model}
-        </Badge>
-      )}
-
-      {modeLabel && permissionMode !== "default" && (
-        <Badge variant="outline" className="no-drag text-[11px] font-normal">
-          {modeLabel}
-        </Badge>
-      )}
-
-      {acpBehaviorLabel && (
-        <Badge variant="outline" className="no-drag text-[11px] font-normal">
-          {acpBehaviorLabel}
-        </Badge>
-      )}
-
-      <div className="ms-auto flex items-center gap-3">
-        {totalCost > 0 && (
-          <span className="text-xs text-muted-foreground tabular-nums">
-            ${totalCost.toFixed(4)}
-          </span>
-        )}
-
-        {sessionId && (
+      {/* Session info — subtle icon, hover reveals model / permissions / cost / session ID */}
+      {hasDetails && (
+        <div className="ms-auto">
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="no-drag cursor-default text-xs text-muted-foreground/60 tabular-nums">
-                {sessionId.slice(0, 8)}
+              <span className="no-drag flex cursor-default items-center justify-center rounded-full p-0.5 text-muted-foreground/30 transition-colors hover:text-muted-foreground">
+                <Info className="h-3.5 w-3.5" />
               </span>
             </TooltipTrigger>
-            <TooltipContent>
-              <p className="font-mono text-xs">{sessionId}</p>
+            <TooltipContent side="bottom" align="end">
+              <div className="space-y-1 text-xs">
+                {detailRows.map((row) => (
+                  <div key={row.label} className="flex justify-between gap-6">
+                    <span className="opacity-70">{row.label}</span>
+                    <span className="font-mono text-end">{row.value}</span>
+                  </div>
+                ))}
+              </div>
             </TooltipContent>
           </Tooltip>
-        )}
-
-      </div>
+        </div>
+      )}
     </div>
   );
 });

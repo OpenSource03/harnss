@@ -34,6 +34,7 @@ import { getLanguageFromPath, INLINE_HIGHLIGHT_STYLE, INLINE_CODE_TAG_STYLE } fr
 import { DiffViewer } from "./DiffViewer";
 import { OpenInEditorButton } from "./OpenInEditorButton";
 import { McpToolContent, hasMcpRenderer, getMcpCompactSummary } from "./McpToolContent";
+import { TextShimmer } from "@/components/ui/text-shimmer";
 
 // ── Stable style constants (avoid re-creating on every render) ──
 
@@ -187,28 +188,22 @@ function RegularTool({ message }: { message: UIMessage }) {
       <CollapsibleTrigger className="group relative flex w-full items-center gap-2 py-1 text-[13px] hover:text-foreground transition-colors cursor-pointer overflow-hidden">
 
         <div className="relative flex items-center gap-2 min-w-0">
-          {isRunning && (
-            <span className="flex h-3.5 w-3.5 items-center justify-center shrink-0">
-              <span className="h-1.5 w-1.5 rounded-full bg-foreground/40 animate-pulse" />
-            </span>
-          )}
           {isError ? (
             <AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-400/70" />
           ) : (
             <Icon className="h-3.5 w-3.5 shrink-0 text-foreground/35" />
           )}
-          <span
-            className={`shrink-0 whitespace-nowrap font-medium ${isError ? "text-red-400/70" : isRunning ? "tool-wave-text" : "text-foreground/75"}`}
-            data-wave-text={isRunning
-              ? (TOOL_ACTIVE[message.toolName ?? ""] ?? getMcpToolLabel(message.toolName ?? "", "active") ?? message.toolName)
-              : undefined}
-          >
-            {isRunning
-              ? (TOOL_ACTIVE[message.toolName ?? ""] ?? getMcpToolLabel(message.toolName ?? "", "active") ?? message.toolName)
-              : isError
+          {isRunning ? (
+            <TextShimmer as="span" className="shrink-0 whitespace-nowrap font-medium" duration={1.8} spread={1.5}>
+              {TOOL_ACTIVE[message.toolName ?? ""] ?? getMcpToolLabel(message.toolName ?? "", "active") ?? message.toolName ?? "Running"}
+            </TextShimmer>
+          ) : (
+            <span className={`shrink-0 whitespace-nowrap font-medium ${isError ? "text-red-400/70" : "text-foreground/75"}`}>
+              {isError
                 ? `Failed to ${(TOOL_ACTIVE[message.toolName ?? ""] ?? getMcpToolLabel(message.toolName ?? "", "active") ?? message.toolName).toLowerCase()}`
                 : (TOOL_PAST[message.toolName ?? ""] ?? getMcpToolLabel(message.toolName ?? "", "past") ?? message.toolName)}
-          </span>
+            </span>
+          )}
           <span className="truncate text-foreground/40">{summary}</span>
         </div>
 
@@ -555,11 +550,6 @@ function TaskTool({ message }: { message: UIMessage }) {
         }`}>
 
           <div className="relative flex items-center gap-2 min-w-0 flex-1">
-            {isRunning && (
-              <span className="flex h-3.5 w-3.5 items-center justify-center shrink-0">
-                <span className="h-1.5 w-1.5 rounded-full bg-foreground/40 animate-pulse" />
-              </span>
-            )}
             {showCard && (
               <ChevronRight
                 className={`h-3 w-3 shrink-0 text-foreground/30 transition-transform duration-200 ${
@@ -573,12 +563,13 @@ function TaskTool({ message }: { message: UIMessage }) {
                 <span className="shrink-0 font-medium text-foreground/75">Used agent</span>
                 <span className="truncate text-foreground/40">{formatTaskSummary(message)}</span>
               </>
+            ) : isRunning ? (
+              <TextShimmer as="span" className="font-medium truncate" duration={1.8} spread={1.5}>
+                {formatTaskRunningTitle(message)}
+              </TextShimmer>
             ) : (
-              <span
-                className={`font-medium truncate ${isRunning ? "tool-wave-text" : "text-foreground/75"}`}
-                data-wave-text={isRunning ? formatTaskRunningTitle(message) : undefined}
-              >
-                {isRunning ? formatTaskRunningTitle(message) : formatTaskTitle(message)}
+              <span className="font-medium truncate text-foreground/75">
+                {formatTaskTitle(message)}
               </span>
             )}
             {stepCount > 0 && (
@@ -706,26 +697,22 @@ function SubagentStepRow({ step }: { step: SubagentToolStep }) {
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="group flex w-full items-center gap-1.5 py-0.5 text-xs hover:text-foreground transition-colors">
-        {!hasResult && (
-          <span className="flex h-3 w-3 items-center justify-center shrink-0">
-            <span className="h-1.5 w-1.5 rounded-full bg-foreground/40 animate-pulse" />
-          </span>
-        )}
         {isError ? (
           <AlertCircle className="h-3 w-3 shrink-0 text-red-400/70" />
         ) : (
           <Icon className="h-3 w-3 shrink-0 text-foreground/35" />
         )}
-        <span
-          className={isError ? "text-red-400/70" : !hasResult ? "tool-wave-text" : "text-foreground/75"}
-          data-wave-text={!hasResult && !isError ? (TOOL_ACTIVE[step.toolName] ?? step.toolName) : undefined}
-        >
-          {hasResult
-            ? isError
+        {!hasResult && !isError ? (
+          <TextShimmer as="span" duration={1.8} spread={1.5}>
+            {TOOL_ACTIVE[step.toolName] ?? step.toolName}
+          </TextShimmer>
+        ) : (
+          <span className={isError ? "text-red-400/70" : "text-foreground/75"}>
+            {isError
               ? `Failed to ${(TOOL_ACTIVE[step.toolName] ?? step.toolName).toLowerCase()}`
-              : (TOOL_PAST[step.toolName] ?? step.toolName)
-            : (TOOL_ACTIVE[step.toolName] ?? step.toolName)}
-        </span>
+              : (TOOL_PAST[step.toolName] ?? step.toolName)}
+          </span>
+        )}
         <span className="truncate text-foreground/40 ms-0.5">
           {formatStepSummary(step)}
         </span>

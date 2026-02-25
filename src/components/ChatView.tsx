@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useMemo, useCallback, memo } from "react";
+import { Minus } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { UIMessage } from "@/types";
 import { MessageBubble } from "./MessageBubble";
@@ -7,6 +8,7 @@ import { ToolCall } from "./ToolCall";
 import { TurnChangesSummary } from "./TurnChangesSummary";
 import { extractTurnSummaries } from "@/lib/turn-changes";
 import type { TurnSummary } from "@/lib/turn-changes";
+import { TextShimmer } from "@/components/ui/text-shimmer";
 
 interface ChatViewProps {
   messages: UIMessage[];
@@ -29,9 +31,12 @@ export const ChatView = memo(function ChatView({ messages, isProcessing, extraBo
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const scrollTimerRef = useRef(0);
   const forceAutoScrollUntilRef = useRef(0);
+  const autoFollowRef = useRef(true);
+  const suppressScrollTrackingRef = useRef(0);
   const settleTimersRef = useRef<number[]>([]);
 
-  // Throttled auto-scroll: instant during streaming, only if near bottom.
+  // Throttled auto-scroll: instant during streaming.
+  // Keeps following while user is pinned to bottom; unlocks only after manual upward scroll.
   // During session switch, temporarily force auto-follow so long-chat reflow
   // (content-visibility / async block expansion) still settles at the true bottom.
   const scrollToBottom = useCallback((opts?: { force?: boolean }) => {
@@ -45,14 +50,16 @@ export const ChatView = memo(function ChatView({ messages, isProcessing, extraBo
     );
     if (!viewport) return;
 
-    const { scrollTop, scrollHeight, clientHeight } = viewport;
-    const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
-    if (!shouldForce && !isNearBottom) return;
+    if (!shouldForce && !autoFollowRef.current) return;
 
+    suppressScrollTrackingRef.current += 1;
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
     if (shouldForce) {
       viewport.scrollTop = viewport.scrollHeight;
     }
+    window.requestAnimationFrame(() => {
+      suppressScrollTrackingRef.current = Math.max(0, suppressScrollTrackingRef.current - 1);
+    });
   }, []);
 
   const clearSettleTimers = useCallback(() => {
@@ -78,10 +85,30 @@ export const ChatView = memo(function ChatView({ messages, isProcessing, extraBo
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  // Track whether user is near the bottom; this drives sticky auto-follow behavior.
+  useEffect(() => {
+    const viewport = scrollAreaRef.current?.querySelector<HTMLElement>(
+      "[data-radix-scroll-area-viewport]",
+    );
+    if (!viewport) return;
+
+    const updateAutoFollow = () => {
+      if (suppressScrollTrackingRef.current > 0) return;
+      const { scrollTop, scrollHeight, clientHeight } = viewport;
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+      autoFollowRef.current = distanceFromBottom < 40;
+    };
+
+    updateAutoFollow();
+    viewport.addEventListener("scroll", updateAutoFollow, { passive: true });
+    return () => viewport.removeEventListener("scroll", updateAutoFollow);
+  }, [messages.length]);
+
   // Force-scroll to bottom on session switch, bypassing the proximity guard
   useEffect(() => {
     if (!sessionId) return;
     scrollTimerRef.current = 0;
+    autoFollowRef.current = true;
     forceAutoScrollUntilRef.current = Date.now() + 1800;
     scheduleSettleToBottom();
   }, [sessionId, scheduleSettleToBottom]);
@@ -108,6 +135,7 @@ export const ChatView = memo(function ChatView({ messages, isProcessing, extraBo
   useEffect(() => {
     if (!scrollToMessageId) return;
     forceAutoScrollUntilRef.current = 0;
+    autoFollowRef.current = false;
     clearSettleTimers();
     const el = scrollAreaRef.current?.querySelector(`[data-message-id="${scrollToMessageId}"]`);
     if (el) {
@@ -228,6 +256,20 @@ export const ChatView = memo(function ChatView({ messages, isProcessing, extraBo
             </Fragment>
           );
         })}
+        {/* Session-level processing indicator: shows while model is working but not outputting text or running tools */}
+        {isProcessing && !messages.some((m) =>
+          (m.role === "assistant" && m.isStreaming && (m.content || m.thinking)) ||
+          (m.role === "tool_call" && !m.toolResult)
+        ) && (
+          <div className="flex justify-start px-4 py-1.5">
+            <div className="flex items-center gap-1.5 text-xs">
+              <Minus className="h-3 w-3 text-foreground/40" />
+              <TextShimmer as="span" className="italic opacity-60" duration={1.8} spread={1.5}>
+                Thinking...
+              </TextShimmer>
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
     </ScrollArea>

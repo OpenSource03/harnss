@@ -15,22 +15,228 @@ import {
   Loader2,
   AlertCircle,
   X,
+  Trash2,
   FolderGit2,
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useGitStatus, type RepoState } from "@/hooks/useGitStatus";
-import type { GitFileChange, GitFileGroup, GitBranch } from "@/types";
+import type { GitFileChange, GitFileGroup, GitBranch, GitRepoInfo } from "@/types";
 
 interface GitPanelProps {
   cwd?: string;
   collapsedRepos?: Set<string>;
   onToggleRepoCollapsed?: (path: string) => void;
+  selectedWorktreePath?: string;
+  onSelectWorktreePath?: (path: string | null) => void;
+  /** Active session engine — used to route commit message generation */
+  activeEngine?: "claude" | "acp";
+  /** Active session ID — used for ACP utility prompts */
+  activeSessionId?: string | null;
 }
 
-export const GitPanel = memo(function GitPanel({ cwd, collapsedRepos, onToggleRepoCollapsed }: GitPanelProps) {
+function formatWorktreeLabel(repo: GitRepoInfo): string {
+  const tags: string[] = [];
+  if (repo.isPrimaryWorktree) tags.push("main");
+  else if (repo.isWorktree) tags.push("worktree");
+  if (repo.isSubRepo) tags.push("sub");
+  return tags.length > 0 ? repo.name + " (" + tags.join(", ") + ")" : repo.name;
+}
+
+interface SelectorOption {
+  value: string;
+  label: string;
+}
+
+function InlineSelector({
+  value,
+  onChange,
+  options,
+  disabled,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: SelectorOption[];
+  disabled?: boolean;
+  className?: string;
+}) {
+  const selected = options.find((opt) => opt.value === value) ?? options[0];
+  const rootClass = [
+    "flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-[11px] text-foreground/70 transition-colors hover:bg-foreground/[0.07] disabled:cursor-not-allowed disabled:opacity-40",
+    className ?? "bg-foreground/[0.04]",
+  ].join(" ");
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled || options.length === 0}
+          className={rootClass}
+        >
+          <span className="min-w-0 flex-1 truncate text-start">{selected?.label ?? "Select..."}</span>
+          <ChevronDown className="h-3 w-3 shrink-0 text-foreground/25" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
+        {options.map((opt) => (
+          <DropdownMenuItem
+            key={opt.value}
+            className="cursor-pointer text-xs"
+            onClick={() => onChange(opt.value)}
+          >
+            <span className="me-1.5 inline-flex w-3 items-center justify-center">
+              {opt.value === selected?.value ? <Check className="h-3 w-3" /> : null}
+            </span>
+            <span className="truncate">{opt.label}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export const GitPanel = memo(function GitPanel({
+  cwd,
+  collapsedRepos,
+  onToggleRepoCollapsed,
+  selectedWorktreePath,
+  onSelectWorktreePath,
+  activeEngine,
+  activeSessionId,
+}: GitPanelProps) {
   const git = useGitStatus({ projectPath: cwd });
+
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createSourcePath, setCreateSourcePath] = useState("");
+  const [createWorktreePath, setCreateWorktreePath] = useState("");
+  const [createBranchName, setCreateBranchName] = useState("");
+  const [createFromRef, setCreateFromRef] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [isCreatingWorktree, setIsCreatingWorktree] = useState(false);
+
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
+  const [removeSourcePath, setRemoveSourcePath] = useState("");
+  const [removeTargetPath, setRemoveTargetPath] = useState("");
+  const [removeForce, setRemoveForce] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [isRemovingWorktree, setIsRemovingWorktree] = useState(false);
+  const [isPruningWorktrees, setIsPruningWorktrees] = useState(false);
+
+  const selectableRepos = useMemo(() => git.repoStates.map((rs) => rs.repo), [git.repoStates]);
+  const linkedWorktrees = useMemo(
+    () => selectableRepos.filter((repo) => repo.isWorktree && !repo.isPrimaryWorktree),
+    [selectableRepos],
+  );
+  const repoOptions = useMemo(
+    () => selectableRepos.map((repo) => ({ value: repo.path, label: formatWorktreeLabel(repo) })),
+    [selectableRepos],
+  );
+  const linkedWorktreeOptions = useMemo(
+    () => linkedWorktrees.map((repo) => ({ value: repo.path, label: repo.path })),
+    [linkedWorktrees],
+  );
+
+  const selectedCwdValue = useMemo(() => {
+    if (selectableRepos.length === 0) return "";
+    if (selectedWorktreePath && selectableRepos.some((repo) => repo.path === selectedWorktreePath)) {
+      return selectedWorktreePath;
+    }
+    if (cwd && selectableRepos.some((repo) => repo.path === cwd)) return cwd;
+    return selectableRepos[0].path;
+  }, [selectableRepos, selectedWorktreePath, cwd]);
+
+  const openCreateDialog = useCallback(() => {
+    setCreateError(null);
+    setCreateDialogOpen(true);
+    setCreateSourcePath((prev) => prev || selectedCwdValue || selectableRepos[0]?.path || "");
+  }, [selectedCwdValue, selectableRepos]);
+
+  const openRemoveDialog = useCallback(() => {
+    setRemoveError(null);
+    setRemoveDialogOpen(true);
+    const defaultSource = removeSourcePath || selectedCwdValue || selectableRepos[0]?.path || "";
+    setRemoveSourcePath(defaultSource);
+    setRemoveTargetPath((prev) => {
+      if (prev && linkedWorktrees.some((repo) => repo.path === prev)) return prev;
+      return linkedWorktrees[0]?.path || "";
+    });
+  }, [linkedWorktrees, removeSourcePath, selectedCwdValue, selectableRepos]);
+
+  const handleRemoveWorktree = useCallback(async () => {
+    if (!removeSourcePath || !removeTargetPath) return;
+    setIsRemovingWorktree(true);
+    setRemoveError(null);
+    try {
+      const result = await git.removeWorktree(removeSourcePath, removeTargetPath, removeForce);
+      if (result?.error) {
+        setRemoveError(result.error);
+        return;
+      }
+      if (selectedWorktreePath === removeTargetPath) onSelectWorktreePath?.(null);
+      setRemoveDialogOpen(false);
+      setRemoveTargetPath("");
+      setRemoveForce(false);
+      setRemoveError(null);
+    } finally {
+      setIsRemovingWorktree(false);
+    }
+  }, [git, onSelectWorktreePath, removeForce, removeSourcePath, removeTargetPath, selectedWorktreePath]);
+
+  const handlePruneWorktrees = useCallback(async () => {
+    if (!removeSourcePath) return;
+    setIsPruningWorktrees(true);
+    try {
+      const result = await git.pruneWorktrees(removeSourcePath);
+      if (result?.error) setRemoveError(result.error);
+    } finally {
+      setIsPruningWorktrees(false);
+    }
+  }, [git, removeSourcePath]);
+
+  const handleCreateWorktree = useCallback(async () => {
+    if (!createSourcePath || !createWorktreePath.trim() || !createBranchName.trim()) return;
+
+    setIsCreatingWorktree(true);
+    setCreateError(null);
+    try {
+      const result = await git.createWorktree(
+        createSourcePath,
+        createWorktreePath.trim(),
+        createBranchName.trim(),
+        createFromRef.trim() || undefined,
+      );
+      if (result?.error) {
+        setCreateError(result.error);
+        return;
+      }
+
+      const nextPath = result?.path ?? createWorktreePath.trim();
+      onSelectWorktreePath?.(nextPath);
+      setCreateDialogOpen(false);
+      setCreateWorktreePath("");
+      setCreateBranchName("");
+      setCreateFromRef("");
+      setCreateError(null);
+    } finally {
+      setIsCreatingWorktree(false);
+    }
+  }, [createSourcePath, createWorktreePath, createBranchName, createFromRef, git, onSelectWorktreePath]);
 
   if (!cwd) {
     return (
@@ -56,6 +262,37 @@ export const GitPanel = memo(function GitPanel({ cwd, collapsedRepos, onToggleRe
               variant="ghost"
               size="icon"
               className="h-5 w-5 shrink-0 text-foreground/30 hover:text-foreground/60"
+              onClick={openCreateDialog}
+            >
+              <Plus className="h-3 w-3" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={4}>
+            <p className="text-xs">Create Worktree</p>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 shrink-0 text-foreground/30 hover:text-foreground/60 disabled:opacity-30"
+              onClick={openRemoveDialog}
+              disabled={linkedWorktrees.length === 0}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={4}>
+            <p className="text-xs">Remove Worktree</p>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 shrink-0 text-foreground/30 hover:text-foreground/60"
               onClick={() => git.refreshAll()}
             >
               <RefreshCw className="h-3 w-3" />
@@ -66,6 +303,17 @@ export const GitPanel = memo(function GitPanel({ cwd, collapsedRepos, onToggleRe
           </TooltipContent>
         </Tooltip>
       </div>
+
+      {onSelectWorktreePath && repoOptions.length > 0 && (
+        <div className="px-3 pb-2">
+          <label className="mb-1 block text-[10px] uppercase tracking-wider text-foreground/25">Agent Worktree</label>
+          <InlineSelector
+            value={selectedCwdValue}
+            onChange={onSelectWorktreePath}
+            options={repoOptions}
+          />
+        </div>
+      )}
 
       <div className="border-t border-foreground/[0.06]" />
 
@@ -88,10 +336,161 @@ export const GitPanel = memo(function GitPanel({ cwd, collapsedRepos, onToggleRe
               git={git}
               collapsed={collapsedRepos?.has(rs.repo.path) ?? false}
               onToggleCollapsed={onToggleRepoCollapsed ? () => onToggleRepoCollapsed(rs.repo.path) : undefined}
+              activeEngine={activeEngine}
+              activeSessionId={activeSessionId}
             />
           </div>
         ))}
       </div>
+
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Create Worktree</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Source Repository</label>
+              <InlineSelector
+                value={createSourcePath}
+                onChange={setCreateSourcePath}
+                options={repoOptions}
+                className="h-8 border border-input bg-background"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Branch</label>
+              <input
+                type="text"
+                value={createBranchName}
+                onChange={(e) => setCreateBranchName(e.target.value)}
+                placeholder="feature/my-work"
+                className="h-8 w-full rounded border border-input bg-background px-2 text-xs text-foreground/80 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Worktree Path</label>
+              <input
+                type="text"
+                value={createWorktreePath}
+                onChange={(e) => setCreateWorktreePath(e.target.value)}
+                placeholder="../repo-feature-my-work"
+                className="h-8 w-full rounded border border-input bg-background px-2 text-xs text-foreground/80 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">From Ref (optional)</label>
+              <input
+                type="text"
+                value={createFromRef}
+                onChange={(e) => setCreateFromRef(e.target.value)}
+                placeholder="origin/main"
+                className="h-8 w-full rounded border border-input bg-background px-2 text-xs text-foreground/80 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+
+            {createError && (
+              <div className="rounded border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-[11px] text-red-300/90">
+                {createError}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setCreateDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleCreateWorktree}
+              disabled={!createSourcePath || !createWorktreePath.trim() || !createBranchName.trim() || isCreatingWorktree}
+            >
+              {isCreatingWorktree ? "Creating..." : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Remove Worktree</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Repository</label>
+              <InlineSelector
+                value={removeSourcePath}
+                onChange={setRemoveSourcePath}
+                options={repoOptions}
+                className="h-8 border border-input bg-background"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Worktree</label>
+              <InlineSelector
+                value={removeTargetPath}
+                onChange={setRemoveTargetPath}
+                options={linkedWorktreeOptions}
+                disabled={linkedWorktreeOptions.length === 0}
+                className="h-8 border border-input bg-background"
+              />
+            </div>
+
+            <label className="flex items-center gap-2 text-xs text-foreground/70">
+              <input
+                type="checkbox"
+                checked={removeForce}
+                onChange={(e) => setRemoveForce(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Force remove
+            </label>
+
+            {removeError && (
+              <div className="rounded border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-[11px] text-red-300/90">
+                {removeError}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handlePruneWorktrees}
+              disabled={!removeSourcePath || isPruningWorktrees}
+            >
+              {isPruningWorktrees ? "Pruning..." : "Prune"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setRemoveDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleRemoveWorktree}
+              disabled={!removeSourcePath || !removeTargetPath || isRemovingWorktree}
+            >
+              {isRemovingWorktree ? "Removing..." : "Remove"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 });
@@ -107,17 +506,22 @@ interface GitActions {
   commit: (repoPath: string, message: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
   checkout: (repoPath: string, branch: string) => Promise<{ ok?: boolean; error?: string } | undefined>;
   createBranch: (repoPath: string, name: string) => Promise<{ ok?: boolean; error?: string } | undefined>;
+  createWorktree: (repoPath: string, worktreePath: string, branch: string, fromRef?: string) => Promise<{ ok?: boolean; path?: string; output?: string; error?: string } | undefined>;
+  removeWorktree: (repoPath: string, worktreePath: string, force?: boolean) => Promise<{ ok?: boolean; output?: string; error?: string } | undefined>;
+  pruneWorktrees: (repoPath: string) => Promise<{ ok?: boolean; output?: string; error?: string } | undefined>;
   push: (repoPath: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
   pull: (repoPath: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
   fetchRemote: (repoPath: string) => Promise<{ ok?: boolean; output?: string; error?: string }>;
   getDiff: (repoPath: string, file: string, staged: boolean) => Promise<{ diff?: string; error?: string } | null>;
 }
 
-function RepoSection({ repoState, git, collapsed: collapsedProp, onToggleCollapsed }: {
+function RepoSection({ repoState, git, collapsed: collapsedProp, onToggleCollapsed, activeEngine, activeSessionId }: {
   repoState: RepoState;
   git: GitActions;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  activeEngine?: "claude" | "acp";
+  activeSessionId?: string | null;
 }) {
   const { repo, status, branches, log } = repoState;
   const cwd = repo.path;
@@ -200,7 +604,11 @@ function RepoSection({ repoState, git, collapsed: collapsedProp, onToggleCollaps
   const handleGenerateMessage = useCallback(async () => {
     setGeneratingMessage(true);
     try {
-      const result = await window.claude.git.generateCommitMessage(cwd);
+      const result = await window.claude.git.generateCommitMessage(
+        cwd,
+        activeEngine,
+        activeEngine === "acp" && activeSessionId ? activeSessionId : undefined,
+      );
       if (result.message) {
         setCommitMessage(result.message);
       } else if (result.error) {
@@ -209,7 +617,7 @@ function RepoSection({ repoState, git, collapsed: collapsedProp, onToggleCollaps
     } finally {
       setGeneratingMessage(false);
     }
-  }, [cwd]);
+  }, [cwd, activeEngine, activeSessionId]);
 
   const handleViewDiff = useCallback(
     async (file: GitFileChange) => {
@@ -295,6 +703,9 @@ function RepoSection({ repoState, git, collapsed: collapsedProp, onToggleCollaps
         <span className="text-[11px] font-medium text-foreground/55">{repo.name}</span>
         {repo.isSubRepo && (
           <span className="rounded bg-foreground/[0.06] px-1 text-[9px] text-foreground/25">sub</span>
+        )}
+        {repo.isWorktree && !repo.isPrimaryWorktree && (
+          <span className="rounded bg-foreground/[0.06] px-1 text-[9px] text-foreground/25">wt</span>
         )}
         {totalChanges > 0 && (
           <span className="rounded-full bg-foreground/[0.08] px-1.5 text-[10px] text-foreground/40">

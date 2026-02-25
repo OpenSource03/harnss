@@ -106,6 +106,50 @@ function getDeepLastTextNode(el: Node): Text | null {
   return el.nodeType === Node.TEXT_NODE ? (el as Text) : null;
 }
 
+/** Detects likely-incomplete markdown code delimiters during streaming. */
+function hasUnbalancedBackticks(markdown: string): boolean {
+  if (!markdown) return false;
+  const parityByRun = new Map<number, number>();
+  for (let i = 0; i < markdown.length;) {
+    if (markdown.charCodeAt(i) !== 96) {
+      i += 1;
+      continue;
+    }
+    // Skip escaped backticks (`\``) so inline literals do not trip balancing.
+    if (i > 0 && markdown.charCodeAt(i - 1) === 92) {
+      i += 1;
+      continue;
+    }
+    let j = i + 1;
+    while (j < markdown.length && markdown.charCodeAt(j) === 96) j += 1;
+    const runLen = j - i;
+    parityByRun.set(runLen, (parityByRun.get(runLen) ?? 0) ^ 1);
+    i = j;
+  }
+  for (const parity of parityByRun.values()) {
+    if (parity === 1) return true;
+  }
+  return false;
+}
+
+function hasCodeAncestor(node: Node, stopAt: Element): boolean {
+  let current: Node | null = node.parentNode;
+  while (current && current !== stopAt) {
+    if (current instanceof HTMLElement) {
+      const tag = current.tagName;
+      if (tag === "CODE" || tag === "PRE") return true;
+    }
+    current = current.parentNode;
+  }
+  return false;
+}
+
+interface InjectedSpanState {
+  span: HTMLSpanElement;
+  expectedPrevText: string;
+  injectedText: string;
+}
+
 /**
  * Injects per-token fade-in animation into a ReactMarkdown container by
  * splitting the trailing text node in `useLayoutEffect` (before paint).
@@ -123,28 +167,37 @@ function getDeepLastTextNode(el: Node): Text | null {
  * sees the intermediate React-only state. React's reconciler simply overwrites
  * our truncated text node on the next commit (it still holds a valid ref to it).
  */
-function useStreamingTextReveal(isStreaming: boolean | undefined) {
+function useStreamingTextReveal(isStreaming: boolean | undefined, markdown: string) {
   const proseRef = useRef<HTMLDivElement>(null);
   const prevBlockTextRef = useRef("");
   const prevLastBlockRef = useRef<Element | null>(null);
-  const injectedSpan = useRef<HTMLSpanElement | null>(null);
+  const injectedSpan = useRef<InjectedSpanState | null>(null);
 
   // Must run before paint so the user never sees un-animated text
   useLayoutEffect(() => {
+    const cleanupInjectedSpan = () => {
+      const injected = injectedSpan.current;
+      if (!injected) return;
+      const { span, expectedPrevText, injectedText } = injected;
+      const prev = span.previousSibling;
+      // Only merge when the node is still in the exact truncated state.
+      // If React already restored full text, merging again would duplicate.
+      if (prev && prev.nodeType === Node.TEXT_NODE) {
+        const prevText = prev.textContent ?? "";
+        if (prevText === expectedPrevText) {
+          prev.textContent = prevText + injectedText;
+        }
+      }
+      if (span.isConnected) span.remove();
+      injectedSpan.current = null;
+    };
+
     // Step 1: merge the injected span back into the preceding text node.
     // When the content string is identical between renders (e.g. the rAF flush
     // already set the final text before the `assistant` snapshot arrives),
     // React's reconciler skips updating the text node — but we truncated it
     // last frame. Merging restores the full value so no text is lost.
-    if (injectedSpan.current) {
-      const span = injectedSpan.current;
-      const prev = span.previousSibling;
-      if (prev && prev.nodeType === Node.TEXT_NODE) {
-        prev.textContent = (prev.textContent ?? "") + (span.textContent ?? "");
-      }
-      span.remove();
-      injectedSpan.current = null;
-    }
+    cleanupInjectedSpan();
 
     if (!isStreaming || !proseRef.current) {
       prevBlockTextRef.current = "";
@@ -175,43 +228,61 @@ function useStreamingTextReveal(isStreaming: boolean | undefined) {
     const prevText = prevBlockTextRef.current;
     prevBlockTextRef.current = blockText;
 
+    // Streaming markdown can be structurally unstable around unmatched backticks.
+    // Skip DOM splitting on those frames to avoid malformed inline-code transitions.
+    const markdownTail = markdown.length > 1200 ? markdown.slice(-1200) : markdown;
+    if (hasUnbalancedBackticks(markdownTail)) return;
+
     // Only animate pure appends — if text shrank or changed in the middle
     // (e.g. markdown syntax closing), skip this frame gracefully.
     if (blockText.length <= prevText.length) return;
     const prefixLen = commonPrefixLength(prevText, blockText);
     if (prefixLen < prevText.length) return;
 
-    const addedChars = blockText.length - prefixLen;
-    if (addedChars <= 0) return;
+    const addedText = blockText.slice(prefixLen);
+    if (!addedText) return;
 
     // Step 3: find the deepest last text node inside the block
     const textNode = getDeepLastTextNode(lastBlock);
     if (!textNode || !textNode.parentNode) return;
+    // Avoid splitting inside <code> where markdown structure can still shift.
+    if (hasCodeAncestor(textNode, lastBlock)) return;
 
     const nodeText = textNode.textContent ?? "";
-    const splitAt = Math.max(0, nodeText.length - addedChars);
-    const newPart = nodeText.slice(splitAt);
-    if (!newPart) return;
+    // Safe path: appended block text must be entirely represented by the tail
+    // of the deepest last text node. Otherwise this frame likely crossed a
+    // markdown structure boundary and should not be surgically split.
+    if (!nodeText.endsWith(addedText)) return;
+    const splitAt = nodeText.length - addedText.length;
+    const prefixText = nodeText.slice(0, splitAt);
 
     // Truncate the React-owned text node and append an animated span
-    textNode.textContent = nodeText.slice(0, splitAt);
+    textNode.textContent = prefixText;
     const span = document.createElement("span");
     span.className = "stream-chunk-enter";
-    span.textContent = newPart;
+    span.textContent = addedText;
     textNode.parentNode.insertBefore(span, textNode.nextSibling);
-    injectedSpan.current = span;
+    injectedSpan.current = {
+      span,
+      expectedPrevText: prefixText,
+      injectedText: addedText,
+    };
   });
 
   // Final cleanup when streaming ends
   useEffect(() => {
     if (!isStreaming) {
-      if (injectedSpan.current) {
-        const span = injectedSpan.current;
+      const injected = injectedSpan.current;
+      if (injected) {
+        const { span, expectedPrevText, injectedText } = injected;
         const prev = span.previousSibling;
         if (prev && prev.nodeType === Node.TEXT_NODE) {
-          prev.textContent = (prev.textContent ?? "") + (span.textContent ?? "");
+          const prevText = prev.textContent ?? "";
+          if (prevText === expectedPrevText) {
+            prev.textContent = prevText + injectedText;
+          }
         }
-        span.remove();
+        if (span.isConnected) span.remove();
         injectedSpan.current = null;
       }
       prevBlockTextRef.current = "";
@@ -240,7 +311,10 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
   // Per-token fade-in animation via DOM surgery in useLayoutEffect.
   // Always renders ReactMarkdown (real-time markdown parsing) — the hook
   // splits trailing text nodes into [old | animated-new] before each paint.
-  const proseRef = useStreamingTextReveal(message.role === "assistant" ? message.isStreaming : undefined);
+  const proseRef = useStreamingTextReveal(
+    message.role === "assistant" ? message.isStreaming : undefined,
+    message.role === "assistant" ? message.content : "",
+  );
 
   if (message.role === "system") {
     const isError = message.isError;
@@ -348,8 +422,6 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
                   {message.content}
                 </ReactMarkdown>
               </div>
-            ) : message.isStreaming && !message.thinking ? (
-              <span className="inline-block h-4 w-1.5 animate-pulse rounded-sm bg-foreground/40" />
             ) : null}
           </div>
         </TooltipTrigger>

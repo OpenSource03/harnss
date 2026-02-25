@@ -73,6 +73,8 @@ export interface Settings {
   // Per-project
   model: string;
   setModel: (m: string) => void;
+  gitCwd: string | null;
+  setGitCwd: (path: string | null) => void;
   activeTools: Set<ToolId>;
   setActiveTools: (updater: Set<ToolId> | ((prev: Set<ToolId>) => Set<ToolId>)) => void;
   rightPanelWidth: number;
@@ -172,6 +174,19 @@ export function useSettings(projectId: string | null): Settings {
     (m: string) => {
       setModelRaw(m);
       localStorage.setItem(`openacpui-${pid}-model`, m);
+    },
+    [pid],
+  );
+
+  const [gitCwd, setGitCwdRaw] = useState<string | null>(() =>
+    localStorage.getItem(`openacpui-${pid}-git-cwd`),
+  );
+  const setGitCwd = useCallback(
+    (nextPath: string | null) => {
+      setGitCwdRaw(nextPath);
+      const key = `openacpui-${pid}-git-cwd`;
+      if (nextPath && nextPath.trim()) localStorage.setItem(key, nextPath.trim());
+      else localStorage.removeItem(key);
     },
     [pid],
   );
@@ -307,6 +322,7 @@ export function useSettings(projectId: string | null): Settings {
 
   useEffect(() => {
     setModelRaw(localStorage.getItem(`openacpui-${pid}-model`) ?? DEFAULT_MODEL);
+    setGitCwdRaw(localStorage.getItem(`openacpui-${pid}-git-cwd`));
 
     const tools = readJson<ToolId[]>(`openacpui-${pid}-active-tools`, []);
     setActiveToolsRaw(new Set(tools));
@@ -339,6 +355,8 @@ export function useSettings(projectId: string | null): Settings {
     setThinking,
     model,
     setModel,
+    gitCwd,
+    setGitCwd,
     activeTools,
     setActiveTools,
     rightPanelWidth,

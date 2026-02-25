@@ -3,20 +3,92 @@ import path from "path";
 import fs from "fs";
 import { gitExec, ALWAYS_SKIP } from "../lib/git-exec";
 
+interface DiscoveredRepo {
+  path: string;
+  name: string;
+  isSubRepo: boolean;
+  isWorktree: boolean;
+  isPrimaryWorktree: boolean;
+}
+
+interface RepoMetadata {
+  topLevel: string;
+  isLinkedWorktree: boolean;
+}
+
+function normalizePath(inputPath: string): string {
+  const resolved = path.resolve(inputPath);
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+function isNestedPath(parentPath: string, childPath: string): boolean {
+  const relative = path.relative(parentPath, childPath);
+  return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function parseWorktreePaths(raw: string): string[] {
+  const paths: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      paths.push(line.slice("worktree ".length).trim());
+    }
+  }
+  return paths;
+}
+
+async function readRepoMetadata(cwd: string): Promise<RepoMetadata | null> {
+  try {
+    const raw = await gitExec(["rev-parse", "--show-toplevel", "--git-dir", "--git-common-dir"], cwd);
+    const [topLevelRaw, gitDirRaw, commonDirRaw] = raw.split("\n").map((line) => line.trim());
+    if (!topLevelRaw || !gitDirRaw || !commonDirRaw) return null;
+
+    const cwdPath = normalizePath(cwd);
+    const topLevel = normalizePath(topLevelRaw);
+    const gitDir = normalizePath(path.isAbsolute(gitDirRaw) ? gitDirRaw : path.resolve(cwdPath, gitDirRaw));
+    const commonDir = normalizePath(path.isAbsolute(commonDirRaw) ? commonDirRaw : path.resolve(cwdPath, commonDirRaw));
+
+    return {
+      topLevel,
+      isLinkedWorktree: gitDir !== commonDir,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function register(): void {
   ipcMain.handle("git:discover-repos", async (_event, projectPath: string) => {
-    const repos: Array<{ path: string; name: string; isSubRepo: boolean }> = [];
+    const normalizedProjectPath = normalizePath(projectPath);
+    const reposByPath = new Map<string, DiscoveredRepo>();
+    const candidatePaths = new Set<string>([normalizedProjectPath]);
 
-    try {
-      await gitExec(["rev-parse", "--git-dir"], projectPath);
-      repos.push({
-        path: projectPath,
-        name: path.basename(projectPath),
-        isSubRepo: false,
+    const upsertRepo = (
+      repoPath: string,
+      { isSubRepo, isWorktree, isPrimaryWorktree }: { isSubRepo: boolean; isWorktree: boolean; isPrimaryWorktree: boolean },
+    ) => {
+      const normalizedRepoPath = normalizePath(repoPath);
+      const existing = reposByPath.get(normalizedRepoPath);
+      if (existing) {
+        existing.isSubRepo = existing.isSubRepo || isSubRepo;
+        existing.isWorktree = existing.isWorktree || isWorktree;
+        existing.isPrimaryWorktree = existing.isPrimaryWorktree || isPrimaryWorktree;
+        return;
+      }
+
+      reposByPath.set(normalizedRepoPath, {
+        path: normalizedRepoPath,
+        name: path.basename(normalizedRepoPath),
+        isSubRepo,
+        isWorktree,
+        isPrimaryWorktree,
       });
-    } catch { /* not a git repo */ }
+    };
 
-    const walk = (dir: string, depth: number) => {
+    const walk = (dir: string, depth: number): void => {
       if (depth > 2) return;
       try {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -26,15 +98,48 @@ export function register(): void {
           if (entry.name === ".git") continue;
           const gitDir = path.join(sub, ".git");
           if (fs.existsSync(gitDir)) {
-            repos.push({ path: sub, name: entry.name, isSubRepo: true });
+            candidatePaths.add(normalizePath(sub));
           } else {
             walk(sub, depth + 1);
           }
         }
-      } catch { /* permission errors */ }
+      } catch {
+        /* permission errors */
+      }
     };
-    walk(projectPath, 0);
-    return repos;
+
+    walk(normalizedProjectPath, 0);
+
+    for (const candidatePath of candidatePaths) {
+      const metadata = await readRepoMetadata(candidatePath);
+      if (!metadata) continue;
+      upsertRepo(metadata.topLevel, {
+        isSubRepo: isNestedPath(normalizedProjectPath, metadata.topLevel),
+        isWorktree: metadata.isLinkedWorktree,
+        isPrimaryWorktree: false,
+      });
+    }
+
+    const worktreeSeedPaths = [...reposByPath.keys()];
+    for (const seedPath of worktreeSeedPaths) {
+      try {
+        const worktreesRaw = await gitExec(["worktree", "list", "--porcelain"], seedPath);
+        const worktreePaths = parseWorktreePaths(worktreesRaw);
+        for (const rawWorktreePath of worktreePaths) {
+          const metadata = await readRepoMetadata(rawWorktreePath);
+          if (!metadata) continue;
+          upsertRepo(metadata.topLevel, {
+            isSubRepo: isNestedPath(normalizedProjectPath, metadata.topLevel),
+            isWorktree: true,
+            isPrimaryWorktree: !metadata.isLinkedWorktree,
+          });
+        }
+      } catch {
+        // Not all repositories use worktrees; ignore and continue discovery.
+      }
+    }
+
+    return [...reposByPath.values()];
   });
 
   ipcMain.handle("git:status", async (_event, cwd: string) => {
@@ -230,6 +335,41 @@ export function register(): void {
     try {
       await gitExec(["checkout", "-b", name], cwd);
       return { ok: true };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle("git:create-worktree", async (_event, { cwd, path: worktreePath, branch, fromRef }: { cwd: string; path: string; branch: string; fromRef?: string }) => {
+    try {
+      const resolvedPath = path.isAbsolute(worktreePath) ? worktreePath : path.resolve(cwd, worktreePath);
+      const args = ["worktree", "add", "-b", branch, resolvedPath];
+      if (fromRef?.trim()) args.push(fromRef.trim());
+      const output = await gitExec(args, cwd);
+      return { ok: true, path: resolvedPath, output };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  });
+
+
+  ipcMain.handle("git:remove-worktree", async (_event, { cwd, path: worktreePath, force }: { cwd: string; path: string; force?: boolean }) => {
+    try {
+      const resolvedPath = path.isAbsolute(worktreePath) ? worktreePath : path.resolve(cwd, worktreePath);
+      const args = ["worktree", "remove"];
+      if (force) args.push("--force");
+      args.push(resolvedPath);
+      const output = await gitExec(args, cwd);
+      return { ok: true, output };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle("git:prune-worktrees", async (_event, cwd: string) => {
+    try {
+      const output = await gitExec(["worktree", "prune"], cwd);
+      return { ok: true, output };
     } catch (err) {
       return { error: (err as Error).message };
     }

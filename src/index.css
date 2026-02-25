@@ -218,41 +218,7 @@ html.platform-win32 .drag-region {
   padding-inline-start: 8px !important;
 }
 
-/* ── Tool Call: Text-only wave ── */
-@keyframes tool-text-wave {
-  0% { background-position: 180% 50%; }
-  100% { background-position: -80% 50%; }
-}
-
-.tool-wave-text {
-  position: relative;
-  display: inline-block;
-  color: color-mix(in oklch, var(--foreground) 70%, transparent);
-}
-
-.tool-wave-text::after {
-  content: attr(data-wave-text);
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  color: transparent;
-  background-image: linear-gradient(
-    115deg,
-    color-mix(in oklch, var(--foreground) 24%, transparent) 0%,
-    color-mix(in oklch, var(--foreground) 100%, transparent) 22%,
-    color-mix(in oklch, var(--foreground) 30%, transparent) 42%,
-    color-mix(in oklch, var(--foreground) 100%, transparent) 62%,
-    color-mix(in oklch, var(--foreground) 26%, transparent) 82%,
-    color-mix(in oklch, var(--foreground) 96%, transparent) 100%
-  );
-  background-size: 220% 100%;
-  background-repeat: no-repeat;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  opacity: 0.92;
-  animation: tool-text-wave 1.85s linear infinite;
-}
+/* ── Tool Call: text shimmer handled by <TextShimmer> component (motion-primitives) ── */
 
 /* ── Search result highlight flash ── */
 @keyframes search-flash {
@@ -312,7 +278,6 @@ html.platform-win32 .drag-region {
 .stream-chunk-enter {
   animation: stream-chunk-enter 0.32s ease-out both;
 }
-
 
 /* Defensive scrollbar hiding for overflow containers (InputBar toolbar fallback) */
 .scrollbar-none::-webkit-scrollbar { display: none; }

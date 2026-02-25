@@ -53,7 +53,8 @@ contextBridge.exposeInMainWorld("claude", {
     ipcRenderer.invoke("claude:restart-session", { sessionId, mcpServers }),
   readFile: (filePath: string) => ipcRenderer.invoke("file:read", filePath),
   openInEditor: (filePath: string, line?: number, editor?: string) => ipcRenderer.invoke("file:open-in-editor", { filePath, line, editor }),
-  generateTitle: (message: string, cwd?: string) => ipcRenderer.invoke("claude:generate-title", { message, cwd }),
+  generateTitle: (message: string, cwd?: string, engine?: "claude" | "acp", sessionId?: string) =>
+    ipcRenderer.invoke("claude:generate-title", { message, cwd, engine, sessionId }),
   projects: {
     list: () => ipcRenderer.invoke("projects:list"),
     create: (spaceId?: string) => ipcRenderer.invoke("projects:create", spaceId),
@@ -93,12 +94,16 @@ contextBridge.exposeInMainWorld("claude", {
     branches: (cwd: string) => ipcRenderer.invoke("git:branches", cwd),
     checkout: (cwd: string, branch: string) => ipcRenderer.invoke("git:checkout", { cwd, branch }),
     createBranch: (cwd: string, name: string) => ipcRenderer.invoke("git:create-branch", { cwd, name }),
+    createWorktree: (cwd: string, path: string, branch: string, fromRef?: string) => ipcRenderer.invoke("git:create-worktree", { cwd, path, branch, fromRef }),
+    removeWorktree: (cwd: string, path: string, force?: boolean) => ipcRenderer.invoke("git:remove-worktree", { cwd, path, force }),
+    pruneWorktrees: (cwd: string) => ipcRenderer.invoke("git:prune-worktrees", cwd),
     push: (cwd: string) => ipcRenderer.invoke("git:push", cwd),
     pull: (cwd: string) => ipcRenderer.invoke("git:pull", cwd),
     fetch: (cwd: string) => ipcRenderer.invoke("git:fetch", cwd),
     diffFile: (cwd: string, file: string, staged: boolean) => ipcRenderer.invoke("git:diff-file", { cwd, file, staged }),
     log: (cwd: string, count?: number) => ipcRenderer.invoke("git:log", { cwd, count }),
-    generateCommitMessage: (cwd: string) => ipcRenderer.invoke("git:generate-commit-message", { cwd }),
+    generateCommitMessage: (cwd: string, engine?: "claude" | "acp", sessionId?: string) =>
+      ipcRenderer.invoke("git:generate-commit-message", { cwd, engine, sessionId }),
   },
   terminal: {
     create: (options: unknown) => ipcRenderer.invoke("terminal:create", options),
