@@ -415,7 +415,7 @@ export function useSessionManager(projects: Project[], acpPermissionBehavior: Ac
         {
           requestId: data.requestId,
           toolName: data.toolCall.title,
-          toolInput: acpNormalizeToolInput(data.toolCall.rawInput),
+          toolInput: acpNormalizeToolInput(data.toolCall.rawInput, data.toolCall.kind),
           toolUseId: data.toolCall.toolCallId,
         },
         data,

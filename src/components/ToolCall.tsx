@@ -332,8 +332,10 @@ function EditContent({ message }: { message: UIMessage }) {
   const filePath = String(
     message.toolInput?.file_path ?? message.toolResult?.filePath ?? "",
   );
-  const oldStr = String(message.toolInput?.old_string ?? "");
-  const newStr = String(message.toolInput?.new_string ?? "");
+  // ACP edits: old_string/new_string may be in toolResult (extracted from content[] diffs
+  // by normalizeToolResult) rather than in toolInput
+  const oldStr = String(message.toolInput?.old_string ?? message.toolResult?.oldString ?? "");
+  const newStr = String(message.toolInput?.new_string ?? message.toolResult?.newString ?? "");
 
   if (!oldStr && !newStr) return <GenericContent message={message} />;
 
@@ -359,6 +361,18 @@ function ReadContent({ message }: { message: UIMessage }) {
             : `L${startLine}–${endLine} of ${totalLines}`}
         </span>
         <OpenInEditorButton filePath={filePath} line={startLine} className="group-hover/read:text-foreground/25" />
+      </div>
+    );
+  }
+
+  // ACP fallback: result has stdout (file contents) but no structured file metadata
+  if (filePath && typeof result?.stdout === "string") {
+    const lineCount = result.stdout.split("\n").length;
+    return (
+      <div className="group/read flex items-center gap-1.5 text-xs text-foreground/50 font-mono text-[11px]">
+        {filePath}
+        <span className="text-foreground/30">{lineCount} lines</span>
+        <OpenInEditorButton filePath={filePath} className="group-hover/read:text-foreground/25" />
       </div>
     );
   }

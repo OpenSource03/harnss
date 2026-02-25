@@ -403,7 +403,7 @@ export class BackgroundSessionStore {
             role: "tool_call",
             content: "",
             toolName: deriveToolName(update.title, update.kind),
-            toolInput: acpNormalizeToolInput(update.rawInput),
+            toolInput: acpNormalizeToolInput(update.rawInput, update.kind, update.locations, update.title),
             ...(initialResult ? { toolResult: initialResult } : {}),
             ...(update.status === "failed" ? { toolError: true } : {}),
             timestamp: Date.now(),

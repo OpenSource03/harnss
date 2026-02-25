@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowDownToLine, RefreshCw, X } from "lucide-react";
 
 type UpdateState =
@@ -11,6 +11,8 @@ type UpdateState =
 export const UpdateBanner = memo(function UpdateBanner() {
   const [state, setState] = useState<UpdateState>({ phase: "idle" });
   const [dismissed, setDismissed] = useState(false);
+  const [isInstalling, setIsInstalling] = useState(false);
+  const installRequestedRef = useRef(false);
 
   useEffect(() => {
     const unsubs: Array<() => void> = [];
@@ -19,18 +21,24 @@ export const UpdateBanner = memo(function UpdateBanner() {
       window.claude.updater.onUpdateAvailable((info) => {
         setState({ phase: "available", version: info.version });
         setDismissed(false);
+        setIsInstalling(false);
+        installRequestedRef.current = false;
       }),
     );
 
     unsubs.push(
       window.claude.updater.onDownloadProgress((progress) => {
         setState({ phase: "downloading", percent: Math.round(progress.percent) });
+        setIsInstalling(false);
+        installRequestedRef.current = false;
       }),
     );
 
     unsubs.push(
       window.claude.updater.onUpdateDownloaded((info) => {
         setState({ phase: "ready", version: info.version });
+        setIsInstalling(false);
+        installRequestedRef.current = false;
       }),
     );
 
@@ -38,6 +46,8 @@ export const UpdateBanner = memo(function UpdateBanner() {
       window.claude.updater.onInstallError((error) => {
         setState({ phase: "error", message: error.message });
         setDismissed(false);
+        setIsInstalling(false);
+        installRequestedRef.current = false;
       }),
     );
 
@@ -50,7 +60,20 @@ export const UpdateBanner = memo(function UpdateBanner() {
   }, []);
 
   const handleInstall = useCallback(() => {
-    window.claude.updater.install();
+    if (installRequestedRef.current) return;
+
+    installRequestedRef.current = true;
+    setIsInstalling(true);
+
+    void window.claude.updater.install().catch((err: unknown) => {
+      installRequestedRef.current = false;
+      setIsInstalling(false);
+      setDismissed(false);
+      setState({
+        phase: "error",
+        message: err instanceof Error ? err.message : "Failed to restart and install update",
+      });
+    });
   }, []);
 
   if (state.phase === "idle" || dismissed) return null;
@@ -109,10 +132,19 @@ export const UpdateBanner = memo(function UpdateBanner() {
               <X className="h-3 w-3" />
             </button>
             <button
-              className="shrink-0 rounded px-2 py-0.5 font-medium text-sidebar-foreground/90 transition-colors hover:bg-sidebar-foreground/10"
+              className="shrink-0 rounded px-2 py-0.5 font-medium text-sidebar-foreground/90 transition-colors hover:bg-sidebar-foreground/10 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
+              disabled={isInstalling}
+              aria-busy={isInstalling}
               onClick={handleInstall}
             >
-              Restart
+              {isInstalling ? (
+                <span className="inline-flex items-center gap-1">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  Restarting...
+                </span>
+              ) : (
+                "Restart"
+              )}
             </button>
           </>
         )}

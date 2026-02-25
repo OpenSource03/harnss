@@ -191,7 +191,7 @@ export function useACP({ sessionId, initialMessages, initialConfigOptions, initi
           role: "tool_call" as const,
           content: "",
           toolName,
-          toolInput: normalizeToolInput(tc.rawInput),
+          toolInput: normalizeToolInput(tc.rawInput, tc.kind, tc.locations, tc.title),
           ...(initialResult ? { toolResult: initialResult } : {}),
           ...(tc.status === "failed" ? { toolError: true } : {}),
           timestamp: Date.now(),
@@ -293,7 +293,7 @@ export function useACP({ sessionId, initialMessages, initialConfigOptions, initi
       setPendingPermission({
         requestId: data.requestId,
         toolName: data.toolCall.title,
-        toolInput: normalizeToolInput(data.toolCall.rawInput),
+        toolInput: normalizeToolInput(data.toolCall.rawInput, data.toolCall.kind),
         toolUseId: data.toolCall.toolCallId,
       });
     });

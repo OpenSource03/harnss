@@ -1,4 +1,4 @@
-import { app, ipcMain, BrowserWindow, shell } from "electron";
+import { app, ipcMain, BrowserWindow, shell, powerMonitor } from "electron";
 import { autoUpdater } from "electron-updater";
 import type { UpdateInfo, ProgressInfo } from "electron-updater";
 import { execFile } from "child_process";
@@ -20,9 +20,45 @@ let lastDownloadedVersion: string | null = null;
 // Flag to prevent window-all-closed from calling app.quit() while quitAndInstall() is
 // managing the quit lifecycle (Squirrel.Mac needs control of the process on macOS).
 let installingUpdate = false;
+let updateCheckInFlight = false;
+let lastUpdateCheckAt = 0;
+
+const STARTUP_UPDATE_CHECK_DELAY_MS = 5_000;
+const PERIODIC_UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1_000;
+const ACTIVE_UPDATE_CHECK_MIN_INTERVAL_MS = 30 * 60 * 1_000;
 
 export function getIsInstallingUpdate(): boolean {
   return installingUpdate;
+}
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+async function checkForUpdates(reason: string): Promise<void> {
+  if (updateCheckInFlight) {
+    log("UPDATER_DEBUG", `Skipping "${reason}" check; update check already in progress`);
+    return;
+  }
+
+  updateCheckInFlight = true;
+  lastUpdateCheckAt = Date.now();
+
+  try {
+    log("UPDATER_DEBUG", `Running update check (${reason})`);
+    await autoUpdater.checkForUpdates();
+  } catch (err) {
+    log("UPDATER_ERR", `${reason} check failed: ${getErrorMessage(err)}`);
+  } finally {
+    updateCheckInFlight = false;
+  }
+}
+
+function maybeCheckForUpdates(reason: string, minIntervalMs: number): void {
+  const elapsedMs = Date.now() - lastUpdateCheckAt;
+  if (elapsedMs < minIntervalMs) return;
+  void checkForUpdates(reason);
 }
 
 export function initAutoUpdater(
@@ -95,7 +131,7 @@ export function initAutoUpdater(
       // Bypass Squirrel entirely: extract the downloaded ZIP and swap the .app bundle manually.
       log("UPDATER", "Squirrel.Mac unavailable (unsigned app), attempting manual install");
       try {
-        await manualMacInstall(getMainWindow());
+        await manualMacInstall();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log("UPDATER_ERR", `Manual install failed: ${msg}`);
@@ -132,24 +168,28 @@ export function initAutoUpdater(
       autoUpdater.quitAndInstall();
     });
   });
-  ipcMain.handle("updater:check", () => autoUpdater.checkForUpdates());
+  ipcMain.handle("updater:check", () => checkForUpdates("manual"));
   ipcMain.handle("updater:current-version", () => app.getVersion());
 
   // Check 5s after startup, then every 4 hours
   setTimeout(() => {
-    autoUpdater.checkForUpdates().catch((err: Error) => {
-      log("UPDATER_ERR", `Check failed: ${err.message}`);
-    });
-  }, 5000);
+    void checkForUpdates("startup");
+  }, STARTUP_UPDATE_CHECK_DELAY_MS);
 
   setInterval(
     () => {
-      autoUpdater.checkForUpdates().catch((err: Error) => {
-        log("UPDATER_ERR", `Periodic check failed: ${err.message}`);
-      });
+      void checkForUpdates("periodic");
     },
-    4 * 60 * 60 * 1000,
+    PERIODIC_UPDATE_CHECK_INTERVAL_MS,
   );
+
+  powerMonitor.on("resume", () => {
+    maybeCheckForUpdates("resume", ACTIVE_UPDATE_CHECK_MIN_INTERVAL_MS);
+  });
+
+  app.on("browser-window-focus", () => {
+    maybeCheckForUpdates("focus", ACTIVE_UPDATE_CHECK_MIN_INTERVAL_MS);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -190,7 +230,7 @@ function findUpdateZip(): string | null {
   return entries.length > 0 ? path.join(cacheDir, entries[0].name) : null;
 }
 
-async function manualMacInstall(mainWindow: BrowserWindow | null): Promise<void> {
+async function manualMacInstall(): Promise<void> {
   const zipPath = findUpdateZip();
   if (!zipPath) throw new Error("Downloaded update ZIP not found in cache");
   log("UPDATER", `Manual install: using ZIP at ${zipPath}`);
