@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/banner.png" alt="Harnss" />
+  <img width="3168" height="1344" alt="Gemini_Generated_Image_yb5gjqyb5gjqyb5g (1)" src="https://github.com/user-attachments/assets/5302f8a2-6235-4ee3-9b68-5ec3a639e971" />
 </p>
 
 <p align="center">
