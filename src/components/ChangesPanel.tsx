@@ -263,23 +263,21 @@ export const ChangesPanel = memo(function ChangesPanel({
           </ScrollArea>
         </div>
 
-        {/* Diff / content viewer */}
-        <div className="flex-1 min-w-0 overflow-hidden">
+        {/* Diff / content viewer — no outer ScrollArea; DiffViewer and
+             WritePreview handle their own overflow to avoid double scrollbars */}
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {selectedChange ? (
-            <ScrollArea className="h-full">
-              <div className="p-0">
-                {selectedChange.toolName === "Edit" ? (
-                  <DiffViewer
-                    oldString={selectedChange.oldString ?? ""}
-                    newString={selectedChange.newString ?? ""}
-                    filePath={selectedChange.filePath}
-                    unifiedDiff={selectedChange.unifiedDiff}
-                  />
-                ) : (
-                  <WritePreview change={selectedChange} />
-                )}
-              </div>
-            </ScrollArea>
+            selectedChange.toolName === "Edit" ? (
+              <DiffViewer
+                oldString={selectedChange.oldString ?? ""}
+                newString={selectedChange.newString ?? ""}
+                filePath={selectedChange.filePath}
+                unifiedDiff={selectedChange.unifiedDiff}
+                fillHeight
+              />
+            ) : (
+              <WritePreview change={selectedChange} />
+            )
           ) : (
             <div className="flex h-full items-center justify-center">
               <p className="text-sm text-muted-foreground/40">Select a file to view changes</p>

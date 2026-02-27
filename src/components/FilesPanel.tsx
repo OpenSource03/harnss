@@ -306,7 +306,7 @@ export const FilesPanel = memo(function FilesPanel({
           </p>
         </div>
       ) : (
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="flex flex-col py-1">
             {files.map((file) => {
               const Icon = ACCESS_ICON[file.accessType];

@@ -13,6 +13,8 @@ interface DiffViewerProps {
   newString: string;
   filePath: string;
   unifiedDiff?: string;
+  /** Fill parent height instead of capping at max-h (used in ChangesPanel) */
+  fillHeight?: boolean;
 }
 
 interface DiffLine {
@@ -67,7 +69,7 @@ const HighlightedCode = memo(function HighlightedCode({
 
 // ── Main component ──
 
-export function DiffViewer({ oldString, newString, filePath, unifiedDiff }: DiffViewerProps) {
+export function DiffViewer({ oldString, newString, filePath, unifiedDiff, fillHeight }: DiffViewerProps) {
   const [fullFileContent, setFullFileContent] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
@@ -128,9 +130,11 @@ export function DiffViewer({ oldString, newString, filePath, unifiedDiff }: Diff
   }, [newString]);
 
   return (
-    <div className="rounded-lg border border-border/50 overflow-hidden font-mono text-[12px] leading-[1.55] bg-black/20">
+    <div className={`overflow-hidden font-mono text-[12px] leading-[1.55] bg-black/20 ${
+      fillHeight ? "flex flex-col h-full" : "rounded-lg border border-border/50"
+    }`}>
       {/* Header */}
-      <div className="group/diff flex items-center gap-3 px-3 py-1.5 bg-foreground/[0.04] border-b border-border/40">
+      <div className="group/diff flex items-center gap-3 px-3 py-1.5 bg-foreground/[0.04] border-b border-border/40 shrink-0">
         <span className="text-foreground/80 truncate flex-1">{fileName}</span>
         <OpenInEditorButton filePath={filePath} className="group-hover/diff:text-foreground/25" />
 
@@ -157,7 +161,7 @@ export function DiffViewer({ oldString, newString, filePath, unifiedDiff }: Diff
       </div>
 
       {/* Diff body */}
-      <div className="overflow-auto max-h-[28rem]">
+      <div className={fillHeight ? "overflow-auto flex-1 min-h-0" : "overflow-auto max-h-[28rem]"}>
         {displayLines.map((line, i) =>
           line.type === "collapsed" ? (
             <CollapsedRow

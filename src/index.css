@@ -279,6 +279,37 @@ html.platform-win32 .drag-region {
   animation: stream-chunk-enter 0.32s ease-out both;
 }
 
+/* ── Global scrollbar styling — thin, themed, always subtly visible ──
+   Thumb stays at low opacity so scrollability is always apparent,
+   and brightens on direct hover for interaction feedback.
+   ScrollArea components override these with their own `display: none`. */
+:root {
+  --scrollbar-thumb: rgba(0, 0, 0, 0.1);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
+}
+.dark {
+  --scrollbar-thumb: rgba(255, 255, 255, 0.1);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.25);
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Defensive scrollbar hiding for overflow containers (InputBar toolbar fallback) */
 .scrollbar-none::-webkit-scrollbar { display: none; }
 .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
