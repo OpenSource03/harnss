@@ -26,7 +26,7 @@ interface QuestionOption {
 interface Question {
   question: string;
   header: string;
-  options: QuestionOption[];
+  options?: QuestionOption[];
   multiSelect: boolean;
 }
 
@@ -154,7 +154,7 @@ function AskUserQuestionPrompt({ request, onRespond }: PermissionPromptProps) {
             <p className="text-[13px] text-foreground">{q.question}</p>
 
             <div className="grid grid-cols-2 gap-1.5">
-              {q.options.map((opt) => {
+              {(q.options ?? []).map((opt) => {
                 const isSelected = selections[q.question]?.has(opt.label);
                 return (
                   <button
@@ -173,27 +173,27 @@ function AskUserQuestionPrompt({ request, onRespond }: PermissionPromptProps) {
                 );
               })}
             </div>
+
+            <input
+              type="text"
+              placeholder="Or type your own answer..."
+              value={freeText[q.question] ?? ""}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFreeText((prev) => ({ ...prev, [q.question]: value }));
+                if (value.trim()) {
+                  setSelections((prev) => ({ ...prev, [q.question]: new Set() }));
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && hasAllAnswers) handleSubmit();
+              }}
+              className="w-full rounded-md border border-border/40 bg-transparent px-2.5 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus-visible:border-border"
+            />
           </div>
         ))}
 
         <div className="flex items-center gap-2 border-t border-border/40 px-3 py-2.5">
-          <input
-            type="text"
-            placeholder="Type your own answer..."
-            value={freeText[questions[0]?.question] ?? ""}
-            onChange={(e) => {
-              const key = questions[0]?.question;
-              if (!key) return;
-              setFreeText((prev) => ({ ...prev, [key]: e.target.value }));
-              if (e.target.value.trim()) {
-                setSelections((prev) => ({ ...prev, [key]: new Set() }));
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && hasAllAnswers) handleSubmit();
-            }}
-            className="min-w-0 flex-1 bg-transparent px-1 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none"
-          />
           <Button
             size="sm"
             variant="ghost"

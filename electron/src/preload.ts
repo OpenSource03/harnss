@@ -14,7 +14,8 @@ contextBridge.exposeInMainWorld("claude", {
   setMinWidth: (width: number) => ipcRenderer.send("app:set-min-width", width),
   start: (options: unknown) => ipcRenderer.invoke("claude:start", options),
   send: (sessionId: string, message: unknown) => ipcRenderer.invoke("claude:send", { sessionId, message }),
-  stop: (sessionId: string) => ipcRenderer.invoke("claude:stop", sessionId),
+  stop: (sessionId: string, reason?: string) =>
+    ipcRenderer.invoke("claude:stop", { sessionId, reason }),
   interrupt: (sessionId: string) => ipcRenderer.invoke("claude:interrupt", sessionId),
   log: (label: string, data: unknown) => ipcRenderer.send("claude:log", label, data),
   onEvent: (callback: (data: unknown) => void) => {
@@ -43,7 +44,11 @@ contextBridge.exposeInMainWorld("claude", {
     ipcRenderer.invoke("claude:set-permission-mode", { sessionId, permissionMode }),
   setModel: (sessionId: string, model: string) =>
     ipcRenderer.invoke("claude:set-model", { sessionId, model }),
+  setThinking: (sessionId: string, thinkingEnabled: boolean) =>
+    ipcRenderer.invoke("claude:set-thinking", { sessionId, thinkingEnabled }),
   supportedModels: (sessionId: string) => ipcRenderer.invoke("claude:supported-models", sessionId),
+  modelsCacheGet: () => ipcRenderer.invoke("claude:models-cache:get"),
+  modelsCacheRevalidate: (options?: { cwd?: string }) => ipcRenderer.invoke("claude:models-cache:revalidate", options),
   mcpStatus: (sessionId: string) => ipcRenderer.invoke("claude:mcp-status", sessionId),
   mcpReconnect: (sessionId: string, serverName: string) =>
     ipcRenderer.invoke("claude:mcp-reconnect", { sessionId, serverName }),
@@ -161,10 +166,11 @@ contextBridge.exposeInMainWorld("claude", {
     },
   },
   codex: {
-    start: (options: { cwd: string; model?: string; approvalPolicy?: string; personality?: string }) =>
+    log: (label: string, data: unknown) => ipcRenderer.send("codex:log", label, data),
+    start: (options: { cwd: string; model?: string; approvalPolicy?: string; personality?: string; collaborationMode?: { mode: string; settings: { model: string; reasoning_effort: string | null; developer_instructions: string | null } } }) =>
       ipcRenderer.invoke("codex:start", options),
-    send: (sessionId: string, text: string, images?: Array<{ type: "image"; url: string } | { type: "localImage"; path: string }>, effort?: string) =>
-      ipcRenderer.invoke("codex:send", { sessionId, text, images, effort }),
+    send: (sessionId: string, text: string, images?: Array<{ type: "image"; url: string } | { type: "localImage"; path: string }>, effort?: string, collaborationMode?: { mode: string; settings: { model: string; reasoning_effort: string | null; developer_instructions: string | null } }) =>
+      ipcRenderer.invoke("codex:send", { sessionId, text, images, effort, collaborationMode }),
     stop: (sessionId: string) => ipcRenderer.invoke("codex:stop", sessionId),
     interrupt: (sessionId: string) => ipcRenderer.invoke("codex:interrupt", sessionId),
     respondApproval: (sessionId: string, rpcId: number, decision: string, acceptSettings?: unknown) =>
@@ -174,7 +180,7 @@ contextBridge.exposeInMainWorld("claude", {
     authStatus: () => ipcRenderer.invoke("codex:auth-status"),
     login: (sessionId: string, type: "apiKey" | "chatgpt", apiKey?: string) =>
       ipcRenderer.invoke("codex:login", { sessionId, type, apiKey }),
-    resume: (options: { cwd: string; threadId: string; model?: string }) =>
+    resume: (options: { cwd: string; threadId: string; model?: string; approvalPolicy?: string }) =>
       ipcRenderer.invoke("codex:resume", options),
     setModel: (sessionId: string, model: string) =>
       ipcRenderer.invoke("codex:set-model", { sessionId, model }),

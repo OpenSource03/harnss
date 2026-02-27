@@ -13,6 +13,7 @@ import {
   File,
   Folder,
   Loader2,
+  Map,
   Mic,
   MicOff,
   Paperclip,
@@ -37,6 +38,7 @@ import type { ImageAttachment, ContextUsage, AgentDefinition, ACPConfigOption, M
 import { flattenConfigOptions } from "@/types/acp";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { resolveModelValue } from "@/lib/model-utils";
+import { isMac } from "@/lib/utils";
 
 const ACP_PERMISSION_BEHAVIORS = [
   { id: "ask" as const, label: "Ask", description: "Show permission prompt" },
@@ -45,12 +47,28 @@ const ACP_PERMISSION_BEHAVIORS = [
 ] as const;
 
 const PERMISSION_MODES = [
-  { id: "plan", label: "Plan" },
   { id: "default", label: "Ask Before Edits" },
   { id: "acceptEdits", label: "Accept Edits" },
-  { id: "dontAsk", label: "Don't Ask" },
   { id: "bypassPermissions", label: "Allow All" },
 ] as const;
+
+const CODEX_PERMISSION_MODE_DETAILS: Record<
+  (typeof PERMISSION_MODES)[number]["id"],
+  { policy: string; description: string }
+> = {
+  default: {
+    policy: "on-request",
+    description: "Prompt before commands and file edits",
+  },
+  acceptEdits: {
+    policy: "untrusted",
+    description: "Auto-approve trusted edits; prompt for untrusted actions",
+  },
+  bypassPermissions: {
+    policy: "never",
+    description: "No approval prompts",
+  },
+};
 
 function formatTokenCount(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
@@ -101,9 +119,11 @@ interface InputBarProps {
   isProcessing: boolean;
   model: string;
   thinking: boolean;
+  planMode: boolean;
   permissionMode: string;
   onModelChange: (model: string) => void;
   onThinkingChange: (thinking: boolean) => void;
+  onPlanModeChange: (enabled: boolean) => void;
   onPermissionModeChange: (mode: string) => void;
   projectPath?: string;
   contextUsage?: ContextUsage | null;
@@ -176,6 +196,19 @@ function insertTextAtCursor(el: HTMLElement | null, text: string): void {
 function extractEditableContent(el: HTMLElement): { text: string; mentionPaths: string[] } {
   let text = "";
   const mentionPaths: string[] = [];
+  const BLOCK_TAGS = new Set([
+    "DIV",
+    "P",
+    "LI",
+    "PRE",
+    "BLOCKQUOTE",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+  ]);
 
   const walk = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
@@ -189,12 +222,19 @@ function extractEditableContent(el: HTMLElement): { text: string; mentionPaths: 
         text += "\n";
       } else {
         for (const child of node.childNodes) walk(child);
+        // Preserve line boundaries when the editor stores rows as block nodes.
+        if (BLOCK_TAGS.has(node.tagName) && !text.endsWith("\n")) {
+          text += "\n";
+        }
       }
     }
   };
 
   for (const child of el.childNodes) walk(child);
-  return { text, mentionPaths: [...new Set(mentionPaths)] };
+  return {
+    text: text.replace(/\r\n/g, "\n").replace(/\u00a0/g, " "),
+    mentionPaths: [...new Set(mentionPaths)],
+  };
 }
 
 export const InputBar = memo(function InputBar({
@@ -203,9 +243,11 @@ export const InputBar = memo(function InputBar({
   isProcessing,
   model,
   thinking,
+  planMode,
   permissionMode,
   onModelChange,
   onThinkingChange,
+  onPlanModeChange,
   onPermissionModeChange,
   projectPath,
   contextUsage,
@@ -893,7 +935,29 @@ export const InputBar = memo(function InputBar({
                   </DropdownMenu>
                 )}
 
-                {/* Codex permission mode — reuse Claude's dropdown */}
+                {/* Plan mode toggle (shared with Claude) */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => onPlanModeChange(!planMode)}
+                      className={`flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors ${
+                        planMode
+                          ? "text-blue-400 bg-blue-500/10"
+                          : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                      }`}
+                    >
+                      <Map className="h-3 w-3" />
+                      Plan
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <p className="text-xs">
+                      {planMode ? "Plan mode on" : "Plan mode off"} ({isMac ? "⌘" : "Ctrl"}+⇧+P)
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* Codex permission mode */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
@@ -905,15 +969,25 @@ export const InputBar = memo(function InputBar({
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
-                    {PERMISSION_MODES.map((m) => (
-                      <DropdownMenuItem
-                        key={m.id}
-                        onClick={() => onPermissionModeChange(m.id)}
-                        className={m.id === permissionMode ? "bg-accent" : ""}
-                      >
-                        {m.label}
-                      </DropdownMenuItem>
-                    ))}
+                    {PERMISSION_MODES.map((m) => {
+                      const details = CODEX_PERMISSION_MODE_DETAILS[m.id];
+                      return (
+                        <DropdownMenuItem
+                          key={m.id}
+                          onClick={() => onPermissionModeChange(m.id)}
+                          className={m.id === permissionMode ? "bg-accent" : ""}
+                        >
+                          <div className="flex min-w-0 flex-col">
+                            <span>{m.label}</span>
+                            <span className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                              <span className="font-mono text-foreground/80">{details.policy}</span>
+                              <span aria-hidden="true">·</span>
+                              <span>{details.description}</span>
+                            </span>
+                          </div>
+                        </DropdownMenuItem>
+                      );
+                    })}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </>
@@ -1023,6 +1097,27 @@ export const InputBar = memo(function InputBar({
                     </DropdownMenuContent>
                   </DropdownMenu>
                 )}
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => onPlanModeChange(!planMode)}
+                      className={`flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors ${
+                        planMode
+                          ? "text-blue-400 bg-blue-500/10"
+                          : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                      }`}
+                    >
+                      <Map className="h-3 w-3" />
+                      Plan
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <p className="text-xs">
+                      {planMode ? "Plan mode on" : "Plan mode off"} ({isMac ? "⌘" : "Ctrl"}+⇧+P)
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

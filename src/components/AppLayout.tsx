@@ -29,7 +29,7 @@ import { useAgentRegistry } from "@/hooks/useAgentRegistry";
 import { useNotifications } from "@/hooks/useNotifications";
 import { resolveModelValue } from "@/lib/model-utils";
 import { isMac } from "@/lib/utils";
-import type { TodoItem, ImageAttachment, Space, SpaceColor, AgentDefinition, AcpPermissionBehavior } from "@/types";
+import type { TodoItem, ImageAttachment, Space, SpaceColor, AgentDefinition, AcpPermissionBehavior, EngineId } from "@/types";
 import type { NotificationSettings } from "@/types/ui";
 
 export function AppLayout() {
@@ -38,18 +38,22 @@ export function AppLayout() {
   const spaceManager = useSpaceManager();
   // Read ACP permission behavior early — it's a global setting (same localStorage key as useSettings)
   // so we can read it before useSettings which depends on manager.activeSession for per-project scoping
-  const acpPermissionBehavior = (localStorage.getItem("openacpui-acp-permission-behavior") ?? "ask") as AcpPermissionBehavior;
+  const acpPermissionBehavior = (localStorage.getItem("harnss-acp-permission-behavior") ?? "ask") as AcpPermissionBehavior;
   const manager = useSessionManager(projectManager.projects, acpPermissionBehavior, spaceManager.setActiveSpaceId);
 
   // Derive activeProjectId early so useSettings can scope per-project
   const activeProjectId = manager.activeSession?.projectId ?? manager.draftProjectId;
   const activeProject = projectManager.projects.find((p) => p.id === activeProjectId);
 
-  const settings = useSettings(activeProjectId ?? null);
+  const [selectedAgent, setSelectedAgent] = useState<AgentDefinition | null>(null);
+  const settingsEngine: EngineId = (!manager.isDraft && manager.activeSession?.engine)
+    ? manager.activeSession.engine
+    : (selectedAgent?.engine ?? "claude");
+  const settings = useSettings(activeProjectId ?? null, settingsEngine);
+  const showThinking = settingsEngine === "claude" ? settings.thinking : true;
   const activeProjectPath = settings.gitCwd ?? activeProject?.path;
   const { agents, refresh: refreshAgents, saveAgent, deleteAgent } = useAgentRegistry();
 
-  const [selectedAgent, setSelectedAgent] = useState<AgentDefinition | null>(null);
   const handleAgentChange = useCallback((agent: AgentDefinition | null) => {
     setSelectedAgent(agent);
 
@@ -58,6 +62,7 @@ export function AppLayout() {
     const currentAgentId = manager.activeSession?.agentId;
     const wantedEngine = agent?.engine ?? "claude";
     const wantedAgentId = agent?.id;
+    const wantedModel = settings.getModelForEngine(wantedEngine);
     const needsNewSession = !manager.isDraft && manager.activeSession && (
       currentEngine !== wantedEngine ||
       (currentEngine === "acp" && wantedEngine === "acp" && currentAgentId !== wantedAgentId)
@@ -65,16 +70,23 @@ export function AppLayout() {
 
     if (needsNewSession) {
       manager.createSession(manager.activeSession!.projectId, {
-        model: settings.model,
+        model: wantedModel || undefined,
         permissionMode: settings.permissionMode,
+        planMode: settings.planMode,
+        thinkingEnabled: settings.thinking,
         engine: wantedEngine,
         agentId: agent?.id ?? "claude-code",
         cachedConfigOptions: agent?.cachedConfigOptions,
       });
     } else {
-      manager.setDraftAgent(agent?.engine ?? "claude", agent?.id ?? "claude-code", agent?.cachedConfigOptions);
+      manager.setDraftAgent(
+        wantedEngine,
+        agent?.id ?? "claude-code",
+        agent?.cachedConfigOptions,
+        wantedModel || undefined,
+      );
     }
-  }, [manager.setDraftAgent, manager.isDraft, manager.activeSession, manager.createSession, settings.model, settings.permissionMode]);
+  }, [manager.setDraftAgent, manager.isDraft, manager.activeSession, manager.createSession, settings.getModelForEngine, settings.permissionMode, settings.planMode, settings.thinking]);
 
   // Engine is locked once a session is active (not draft) — null means free to switch
   const lockedEngine = !manager.isDraft && manager.activeSession?.engine
@@ -181,15 +193,18 @@ export function AppLayout() {
     async (projectId: string) => {
       setShowSettings(false);
       const agent = selectedAgent;
+      const wantedEngine = agent?.engine ?? "claude";
       await manager.createSession(projectId, {
-        model: settings.model,
+        model: settings.getModelForEngine(wantedEngine) || undefined,
         permissionMode: settings.permissionMode,
-        engine: agent?.engine ?? "claude",
+        planMode: settings.planMode,
+        thinkingEnabled: settings.thinking,
+        engine: wantedEngine,
         agentId: agent?.id ?? "claude-code",
         cachedConfigOptions: agent?.cachedConfigOptions,
       });
     },
-    [manager.createSession, settings.model, settings.permissionMode, selectedAgent],
+    [manager.createSession, settings.getModelForEngine, settings.permissionMode, settings.planMode, settings.thinking, selectedAgent],
   );
 
   const handleSend = useCallback(
@@ -199,6 +214,7 @@ export function AppLayout() {
       const wantedEngine = selectedAgent?.engine ?? "claude";
       const currentAgentId = manager.activeSession?.agentId;
       const wantedAgentId = selectedAgent?.id;
+      const wantedModel = settings.getModelForEngine(wantedEngine);
       const needsNewSession = !manager.isDraft && manager.activeSession && (
         currentEngine !== wantedEngine ||
         // Switching ACP agents within a session must also create a new chat
@@ -206,8 +222,10 @@ export function AppLayout() {
       );
       if (needsNewSession) {
         await manager.createSession(manager.activeSession!.projectId, {
-          model: settings.model,
+          model: wantedModel || undefined,
           permissionMode: settings.permissionMode,
+          planMode: settings.planMode,
+          thinkingEnabled: settings.thinking,
           engine: wantedEngine,
           agentId: selectedAgent?.id ?? "claude-code",
           cachedConfigOptions: selectedAgent?.cachedConfigOptions,
@@ -215,7 +233,7 @@ export function AppLayout() {
       }
       await manager.send(text, images, displayText);
     },
-    [manager.send, manager.isDraft, manager.activeSession, manager.createSession, selectedAgent, settings.model, settings.permissionMode],
+    [manager.send, manager.isDraft, manager.activeSession, manager.createSession, selectedAgent, settings.getModelForEngine, settings.permissionMode, settings.planMode, settings.thinking],
   );
 
   const handleModelChange = useCallback(
@@ -234,9 +252,33 @@ export function AppLayout() {
     [settings, manager.setActivePermissionMode],
   );
 
+  const handlePlanModeChange = useCallback(
+    (enabled: boolean) => {
+      settings.setPlanMode(enabled);
+      manager.setActivePlanMode(enabled);
+    },
+    [settings, manager.setActivePlanMode],
+  );
+
+  const handleThinkingChange = useCallback(
+    (enabled: boolean) => {
+      settings.setThinking(enabled);
+      manager.setActiveThinking(enabled);
+    },
+    [settings, manager.setActiveThinking],
+  );
+
   const handleStop = useCallback(async () => {
     await manager.interrupt();
   }, [manager.interrupt]);
+
+  // "Implement this plan" — exits plan mode and sends a short instruction.
+  // The plan is already in the conversation context so no need to repeat it.
+  const handleImplementPlan = useCallback(async (_planContent: string) => {
+    settings.setPlanMode(false);
+    manager.setActivePlanMode(false);
+    await manager.send("Implement the plan.");
+  }, [settings, manager.setActivePlanMode, manager.send]);
 
   // Wrap session selection to also close settings view
   const handleSelectSession = useCallback(
@@ -326,7 +368,7 @@ export function AppLayout() {
 
   // ── Space ↔ session tracking: switch to last used chat when changing spaces ──
 
-  const LAST_SESSION_KEY = "openacpui-last-session-per-space";
+  const LAST_SESSION_KEY = "harnss-last-session-per-space";
   const prevSpaceIdRef = useRef(spaceManager.activeSpaceId);
 
   // Helper: read the map from localStorage
@@ -469,11 +511,12 @@ export function AppLayout() {
     const session = manager.sessions.find((s) => s.id === manager.activeSessionId);
     if (!session?.model) return;
 
+    const sessionEngine = session.engine ?? "claude";
     const syncedModel = resolveModelValue(session.model, manager.supportedModels) ?? session.model;
-    if (syncedModel !== settings.model) {
-      settings.setModel(syncedModel);
+    if (syncedModel !== settings.getModelForEngine(sessionEngine)) {
+      settings.setModelForEngine(sessionEngine, syncedModel);
     }
-  }, [manager.activeSessionId, manager.isDraft, manager.sessions, manager.supportedModels, settings.model, settings.setModel]);
+  }, [manager.activeSessionId, manager.isDraft, manager.sessions, manager.supportedModels, settings.getModelForEngine, settings.setModelForEngine]);
 
   // Sync selectedAgent when switching to a different session
   useEffect(() => {
@@ -504,8 +547,14 @@ export function AppLayout() {
     }
   }, [manager.activeSessionId, manager.isDraft, manager.sessions, agents]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Derive the latest todo list from the most recent TodoWrite tool call
+  // Derive the latest todo list — Codex uses turn/plan/updated events,
+  // Claude uses TodoWrite tool calls in the message stream
   const activeTodos = useMemo(() => {
+    // Codex engine: todos come from turn/plan/updated events
+    if (manager.codexTodoItems && manager.codexTodoItems.length > 0) {
+      return manager.codexTodoItems;
+    }
+    // Claude engine: todos derived from last TodoWrite tool call in messages
     for (let i = manager.messages.length - 1; i >= 0; i--) {
       const msg = manager.messages[i];
       if (
@@ -517,7 +566,7 @@ export function AppLayout() {
       }
     }
     return [];
-  }, [manager.messages]);
+  }, [manager.messages, manager.codexTodoItems]);
 
   const bgAgents = useBackgroundAgents({
     messages: manager.messages,
@@ -570,7 +619,7 @@ export function AppLayout() {
   // Minimum chat width — must fit the full InputBar toolbar including agent dropdown +
   // longest model name + "Ask Before Edits" permission + reasoning + context + send.
   // Breakdown: 56px outer padding (px-4+px-3) + ~550px toolbar content = ~606px, rounded up.
-  const MIN_CHAT_WIDTH = 640;
+  const MIN_CHAT_WIDTH = 768;
   // ToolPicker strip (w-14 = 56px) + its left margin (ms-2 = 8px)
   const TOOL_PICKER_WIDTH = 64;
   const RESIZE_HANDLE_WIDTH = 8;
@@ -824,12 +873,34 @@ export function AppLayout() {
     [settings],
   );
 
-  // Sync InputBar toggle when sessionInfo.permissionMode changes (e.g. ExitPlanMode)
+  // Cmd+Shift+P (Mac) / Ctrl+Shift+P — toggle plan mode for Claude and Codex engines
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "p") {
+        e.preventDefault();
+        const engine = manager.activeSession?.engine ?? selectedAgent?.engine ?? "claude";
+        if (engine === "acp") return; // ACP doesn't support plan mode
+        const next = !settings.planMode;
+        settings.setPlanMode(next);
+        manager.setActivePlanMode(next);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [settings.planMode, settings.setPlanMode, manager.setActivePlanMode, manager.activeSession?.engine, selectedAgent?.engine]);
+
+  // Sync InputBar controls when sessionInfo.permissionMode changes (e.g. ExitPlanMode)
   useEffect(() => {
     const mode = manager.sessionInfo?.permissionMode;
-    if (mode && mode !== settings.permissionMode) {
-      settings.setPermissionMode(mode);
+    if (!mode) return;
+    if (mode === "plan") {
+      if (!settings.planMode) settings.setPlanMode(true);
+      manager.setActivePlanMode(true);
+      return;
     }
+    if (settings.planMode) settings.setPlanMode(false);
+    manager.setActivePlanMode(false);
+    if (mode !== settings.permissionMode) settings.setPermissionMode(mode);
   }, [manager.sessionInfo?.permissionMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { activeTools } = settings;
@@ -887,7 +958,7 @@ export function AppLayout() {
         {/* Keep chat area mounted (hidden) when settings is open to avoid
             destroying/recreating the entire ChatView DOM tree on toggle */}
         <div className={showSettings ? "hidden" : "contents"}>
-        <div className="island relative flex min-w-[640px] flex-1 flex-col overflow-hidden rounded-lg bg-background">
+        <div className="island relative flex min-w-[768px] flex-1 flex-col overflow-hidden rounded-lg bg-background">
           {manager.activeSessionId ? (
             <>
               <div className="pointer-events-none absolute inset-x-0 top-0 z-[5] h-24 bg-gradient-to-b from-black to-transparent" />
@@ -899,6 +970,7 @@ export function AppLayout() {
                   sessionId={manager.sessionInfo?.sessionId}
                   totalCost={manager.totalCost}
                   title={manager.activeSession?.title}
+                  planMode={settings.planMode}
                   permissionMode={manager.sessionInfo?.permissionMode}
                   acpPermissionBehavior={manager.activeSession?.engine === "acp" ? settings.acpPermissionBehavior : undefined}
                   onToggleSidebar={sidebar.toggle}
@@ -907,6 +979,7 @@ export function AppLayout() {
               <ChatView
                 messages={manager.messages}
                 isProcessing={manager.isProcessing}
+                showThinking={showThinking}
                 extraBottomPadding={!!manager.pendingPermission}
                 scrollToMessageId={scrollToMessageId}
                 onScrolledToMessage={() => setScrollToMessageId(undefined)}
@@ -914,6 +987,7 @@ export function AppLayout() {
                 onRevert={manager.isConnected && manager.revertFiles ? manager.revertFiles : undefined}
                 onFullRevert={manager.isConnected && manager.fullRevert ? manager.fullRevert : undefined}
                 onViewTurnChanges={handleViewTurnChanges}
+                onImplementPlan={handleImplementPlan}
               />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[5] h-24 bg-gradient-to-t from-black/60 to-transparent" />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
@@ -930,9 +1004,11 @@ export function AppLayout() {
                     queuedCount={manager.queuedCount}
                     model={settings.model}
                     thinking={settings.thinking}
+                    planMode={settings.planMode}
                     permissionMode={settings.permissionMode}
                     onModelChange={handleModelChange}
-                    onThinkingChange={settings.setThinking}
+                    onThinkingChange={handleThinkingChange}
+                    onPlanModeChange={handlePlanModeChange}
                     onPermissionModeChange={handlePermissionModeChange}
                     projectPath={activeProjectPath}
                     contextUsage={manager.contextUsage}

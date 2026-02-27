@@ -17,13 +17,13 @@ export function TodoPanel({ todos }: TodoPanelProps) {
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-center gap-2 mb-3">
-          <ListChecks className="h-4 w-4 text-foreground/40" />
-          <span className="text-sm font-medium text-foreground/70">Tasks</span>
-          <span className="ms-auto text-xs tabular-nums text-foreground/40">
+          <ListChecks className="h-4 w-4 text-foreground/50" />
+          <span className="text-sm font-medium text-foreground/80">Tasks</span>
+          <span className="ms-auto text-xs tabular-nums text-foreground/50">
             {completed}/{total}
           </span>
         </div>
-        <div className="h-1.5 rounded-full bg-foreground/[0.06] overflow-hidden">
+        <div className="h-1.5 rounded-full bg-foreground/[0.08] overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-500 ease-out ${
               allDone ? "bg-emerald-500/60" : "bg-blue-500/50"
@@ -34,7 +34,7 @@ export function TodoPanel({ todos }: TodoPanelProps) {
       </div>
 
       {/* Separator */}
-      <div className="border-t border-foreground/[0.06]" />
+      <div className="border-t border-foreground/[0.08]" />
 
       {/* Scrollable todo list */}
       <ScrollArea className="min-h-0 flex-1">
@@ -52,16 +52,16 @@ export function TodoPanel({ todos }: TodoPanelProps) {
                 ) : todo.status === "in_progress" ? (
                   <Loader2 className="h-4 w-4 text-blue-400/70 animate-spin" />
                 ) : (
-                  <Circle className="h-4 w-4 text-foreground/15" />
+                  <Circle className="h-4 w-4 text-foreground/20" />
                 )}
               </div>
               <span
                 className={`text-[13px] leading-snug ${
                   todo.status === "completed"
-                    ? "text-foreground/25 line-through"
+                    ? "text-foreground/30 line-through"
                     : todo.status === "in_progress"
-                      ? "text-foreground/80"
-                      : "text-foreground/40"
+                      ? "text-foreground/90"
+                      : "text-foreground/50"
                 }`}
               >
                 {todo.status === "in_progress" && todo.activeForm

@@ -56,10 +56,10 @@ export function BackgroundAgentsPanel({ agents, onDismiss }: BackgroundAgentsPan
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-center gap-2">
-          <Bot className="h-4 w-4 text-foreground/40" />
-          <span className="text-sm font-medium text-foreground/70">Agents</span>
+          <Bot className="h-4 w-4 text-foreground/50" />
+          <span className="text-sm font-medium text-foreground/80">Agents</span>
           {runningCount > 0 && (
-            <span className="ms-auto flex items-center gap-1.5 text-xs text-foreground/40">
+            <span className="ms-auto flex items-center gap-1.5 text-xs text-foreground/50">
               <Loader2 className="h-3 w-3 animate-spin" />
               <span className="tabular-nums">{runningCount}</span>
             </span>
@@ -68,7 +68,7 @@ export function BackgroundAgentsPanel({ agents, onDismiss }: BackgroundAgentsPan
       </div>
 
       {/* Separator */}
-      <div className="border-t border-foreground/[0.06]" />
+      <div className="border-t border-foreground/[0.08]" />
 
       {/* Scrollable agent list */}
       <ScrollArea className="min-h-0 flex-1">
@@ -105,7 +105,7 @@ function AgentItem({
       >
         <CollapsibleTrigger className="group flex w-full items-center gap-2 px-2 py-1.5 text-[13px] hover:text-foreground transition-colors cursor-pointer">
           <ChevronRight
-            className={`h-3 w-3 shrink-0 text-foreground/30 transition-transform duration-200 ${
+            className={`h-3 w-3 shrink-0 text-foreground/40 transition-transform duration-200 ${
               expanded ? "rotate-90" : ""
             }`}
           />
@@ -116,15 +116,15 @@ function AgentItem({
           ) : (
             <AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-400/60" />
           )}
-          <span className="truncate text-foreground/70">{agent.description}</span>
+          <span className="truncate text-foreground/80">{agent.description}</span>
         </CollapsibleTrigger>
 
         {/* Live step indicator when collapsed & running */}
         {isRunning && !expanded && lastActivity && (
-          <div className="px-2 ps-9 pb-1.5 text-xs text-foreground/30 truncate">
+          <div className="px-2 ps-9 pb-1.5 text-xs text-foreground/40 truncate">
             <span className="animate-pulse">
               {lastActivity.toolName && (
-                <span className="text-foreground/40">{lastActivity.toolName} </span>
+                <span className="text-foreground/50">{lastActivity.toolName} </span>
               )}
               {lastActivity.summary}
             </span>
@@ -153,7 +153,7 @@ function AgentItem({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="ms-auto h-5 w-5 text-foreground/30 hover:text-foreground/60"
+                  className="ms-auto h-5 w-5 text-foreground/40 hover:text-foreground/70"
                   onClick={(e) => {
                     e.stopPropagation();
                     onDismiss(agent.agentId);
@@ -180,10 +180,10 @@ function AgentResult({ result }: { result: string }) {
         className={`prose prose-invert prose-xs max-w-none text-[11px] text-foreground/60 wrap-break-word
           [&_p]:my-1 [&_p]:leading-relaxed
           [&_pre]:my-1 [&_pre]:rounded [&_pre]:bg-foreground/[0.04] [&_pre]:px-2 [&_pre]:py-1.5 [&_pre]:text-[10px]
-          [&_code]:text-[10px] [&_code]:text-foreground/50
+          [&_code]:text-[10px] [&_code]:text-foreground/60
           [&_ul]:my-1 [&_ul]:ps-4 [&_ol]:my-1 [&_ol]:ps-4
           [&_li]:my-0 [&_li]:text-[11px]
-          [&_strong]:text-foreground/70
+          [&_strong]:text-foreground/80
           [&_h1]:text-xs [&_h1]:my-1 [&_h2]:text-xs [&_h2]:my-1 [&_h3]:text-[11px] [&_h3]:my-1
           ${!resultExpanded && isLong ? "line-clamp-4" : ""}`}
       >
@@ -192,7 +192,7 @@ function AgentResult({ result }: { result: string }) {
       {isLong && (
         <button
           type="button"
-          className="mt-1 text-[10px] text-foreground/30 hover:text-foreground/50 transition-colors cursor-pointer"
+          className="mt-1 text-[10px] text-foreground/40 hover:text-foreground/60 transition-colors cursor-pointer"
           onClick={(e) => {
             e.stopPropagation();
             setResultExpanded((v) => !v);
@@ -210,9 +210,9 @@ function ActivityRow({ activity }: { activity: BackgroundAgentActivity }) {
     const Icon = getToolIcon(activity.toolName ?? "");
     return (
       <div className="flex items-center gap-1.5 text-xs min-w-0">
-        <Icon className="h-3 w-3 shrink-0 text-foreground/30" />
-        <span className="shrink-0 text-foreground/50">{activity.toolName}</span>
-        <span className="truncate text-foreground/30">{activity.summary}</span>
+        <Icon className="h-3 w-3 shrink-0 text-foreground/40" />
+        <span className="shrink-0 text-foreground/60">{activity.toolName}</span>
+        <span className="truncate text-foreground/40">{activity.summary}</span>
       </div>
     );
   }
@@ -228,7 +228,7 @@ function ActivityRow({ activity }: { activity: BackgroundAgentActivity }) {
 
   // text type
   return (
-    <div className="text-xs text-foreground/35 italic truncate">
+    <div className="text-xs text-foreground/45 italic truncate">
       {activity.summary}
     </div>
   );

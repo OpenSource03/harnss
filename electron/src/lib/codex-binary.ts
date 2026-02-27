@@ -3,7 +3,7 @@
  *
  * Search order:
  * 1. CODEX_CLI_PATH env var (explicit override)
- * 2. App data dir ({userData}/openacpui-data/bin/codex) — our managed copy
+ * 2. App data dir ({userData}/openacpui-data/bin/codex) — our managed copy (kept as openacpui-data for backward compat)
  * 3. System PATH (which codex)
  * 4. Known install locations (Homebrew, Codex Desktop app bundle)
  *
@@ -18,12 +18,15 @@ import { execSync, execFileSync } from "child_process";
 import { app } from "electron";
 import { log } from "./logger";
 
+// Codex Desktop app bundle is prioritized because it ships a newer binary
+// that supports features like collaborationMode (plan mode), while the
+// homebrew/system CLI may be an older version.
 const KNOWN_PATHS: string[] =
   process.platform === "darwin"
     ? [
+        "/Applications/Codex.app/Contents/Resources/codex",
         "/opt/homebrew/bin/codex",
         "/usr/local/bin/codex",
-        "/Applications/Codex.app/Contents/Resources/codex",
       ]
     : process.platform === "linux"
       ? ["/usr/local/bin/codex", "/usr/bin/codex"]
@@ -70,7 +73,15 @@ function resolveCodexPathSync(): string {
   const managed = getManagedBinaryPath();
   if (isExecutable(managed)) return managed;
 
-  // 3. System PATH
+  // 3. Known install locations — checked BEFORE system PATH because
+  //    the Codex Desktop app bundle ships a newer binary that supports
+  //    features like collaborationMode (plan mode), while the homebrew
+  //    CLI may be an older version that silently ignores them.
+  for (const known of KNOWN_PATHS) {
+    if (isExecutable(known)) return known;
+  }
+
+  // 4. System PATH (fallback)
   try {
     const cmd = process.platform === "win32" ? "where" : "which";
     const resolved = execSync(`${cmd} codex`, { encoding: "utf-8", timeout: 5000 }).trim();
@@ -79,14 +90,10 @@ function resolveCodexPathSync(): string {
     /* not in PATH */
   }
 
-  // 4. Known install locations
-  for (const known of KNOWN_PATHS) {
-    if (isExecutable(known)) return known;
-  }
-
   throw new Error("Codex binary not found");
 }
 
+// Reset on each app launch so binary resolution picks up newly installed/updated binaries
 let cachedPath: string | null = null;
 
 /**

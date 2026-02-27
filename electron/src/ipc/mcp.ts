@@ -40,7 +40,7 @@ async function probeHttpServer(server: McpServerConfig): Promise<ProbeResult> {
         params: {
           protocolVersion: "2024-11-05",
           capabilities: {},
-          clientInfo: { name: "OpenACP UI", version: "0.1.0" },
+          clientInfo: { name: "Harnss", version: "0.1.0" },
         },
       }),
       signal: controller.signal,

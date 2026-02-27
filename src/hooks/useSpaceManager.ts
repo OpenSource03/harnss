@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import type { Space, SpaceColor } from "@/types";
 
-const ACTIVE_SPACE_KEY = "openacpui-active-space";
+const ACTIVE_SPACE_KEY = "harnss-active-space";
 
 export function useSpaceManager() {
   const [spaces, setSpaces] = useState<Space[]>([]);

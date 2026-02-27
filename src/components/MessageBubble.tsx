@@ -13,9 +13,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { guessLanguage } from "@/lib/languages";
+import { extractProposedPlan, getPrePlanContent, hasPartialPlanTag } from "@/lib/plan-parser";
 import type { UIMessage } from "@/types";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { CopyButton } from "./CopyButton";
+import { ProposedPlanCard } from "./ProposedPlanCard";
 
 // Stable references to avoid re-creating on every render
 const REMARK_PLUGINS = [remarkGfm];
@@ -295,25 +297,48 @@ function useStreamingTextReveal(isStreaming: boolean | undefined, markdown: stri
 
 interface MessageBubbleProps {
   message: UIMessage;
+  showThinking?: boolean;
   isContinuation?: boolean;
   /** Called when user clicks "Revert files only" — restores files to state before this message */
   onRevert?: (checkpointId: string) => void;
   /** Called when user clicks "Revert files + chat" — restores files AND truncates conversation */
   onFullRevert?: (checkpointId: string) => void;
+  /** Called when user clicks "Implement this plan" on a ProposedPlanCard */
+  onImplementPlan?: (planContent: string) => void;
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, isContinuation, onRevert, onFullRevert }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, showThinking = true, isContinuation, onRevert, onFullRevert, onImplementPlan }: MessageBubbleProps) {
   // All hooks must be called before any early returns (Rules of Hooks)
   const isUser = message.role === "user";
   const time = useMemo(() => new Date(message.timestamp).toLocaleTimeString(), [message.timestamp]);
   const displayContent = useMemo(() => isUser ? (message.displayContent ?? stripFileContext(message.content)) : message.content, [isUser, message.content, message.displayContent]);
+
+  // Detect <proposed_plan> blocks in assistant messages (works for both Claude and Codex)
+  const plan = useMemo(
+    () => (message.role === "assistant" ? extractProposedPlan(message.content) : null),
+    [message.role, message.content],
+  );
+  const prePlanContent = useMemo(
+    () => (plan ? getPrePlanContent(message.content) : null),
+    [plan, message.content],
+  );
+  const isStreamingPlan = message.role === "assistant" && !!message.isStreaming && hasPartialPlanTag(message.content);
+  // For streaming plans, extract the partial content inside the open tag for ProposedPlanCard
+  const streamingPlan = useMemo(() => {
+    if (!isStreamingPlan) return null;
+    // Extract content after the opening <proposed_plan ...> tag
+    const tagMatch = /<proposed_plan(?:\s+title="([^"]*)")?\s*>(.*)$/s.exec(message.content);
+    if (!tagMatch) return null;
+    return { title: tagMatch[1] || "Plan", content: tagMatch[2].trim(), raw: message.content };
+  }, [isStreamingPlan, message.content]);
 
   // Per-token fade-in animation via DOM surgery in useLayoutEffect.
   // Always renders ReactMarkdown (real-time markdown parsing) — the hook
   // splits trailing text nodes into [old | animated-new] before each paint.
   const proseRef = useStreamingTextReveal(
     message.role === "assistant" ? message.isStreaming : undefined,
-    message.role === "assistant" ? message.content : "",
+    // When a plan block exists, only animate the pre-plan content
+    message.role === "assistant" ? (prePlanContent ?? message.content) : "",
   );
 
   if (message.role === "system") {
@@ -336,7 +361,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
     const canRevert = !!checkpointId && (!!onRevert || !!onFullRevert);
     return (
       <div className={cn("group/user flex justify-end px-4 py-1.5", message.isQueued && "opacity-60")}>
-        <div className="max-w-[80%]">
+        <div className={cn("relative max-w-[80%]", canRevert && "pb-5")}>
           <Tooltip>
             <TooltipTrigger asChild>
               <div className={cn(
@@ -370,10 +395,10 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
           </Tooltip>
           {/* Revert dropdown — visible on hover, offers file-only or full (files + chat) revert */}
           {canRevert && (
-            <div className="mt-0.5 flex justify-end opacity-0 transition-opacity group-hover/user:opacity-100">
+            <div className="pointer-events-none absolute end-0 -bottom-0.5 w-max opacity-0 transition-opacity group-hover/user:opacity-100">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-foreground/30 transition-colors hover:text-foreground/60">
+                  <button className="pointer-events-auto flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] text-foreground/30 transition-colors hover:text-foreground/60">
                     <Undo2 className="h-3 w-3" />
                     Revert to here
                   </button>
@@ -406,14 +431,36 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
       <Tooltip>
         <TooltipTrigger asChild>
           <div className="min-w-0 max-w-[85%] wrap-break-word">
-            {message.thinking && (
+            {showThinking && message.thinking && (
               <ThinkingBlock
                 thinking={message.thinking}
                 isStreaming={message.isStreaming}
                 thinkingComplete={message.thinkingComplete}
               />
             )}
-            {message.content ? (
+            {/* When a <proposed_plan> block is found, split into pre-plan markdown + plan card */}
+            {plan ? (
+              <>
+                {prePlanContent ? (
+                  <div ref={proseRef} className="prose prose-invert prose-sm max-w-none text-foreground">
+                    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MD_COMPONENTS}>
+                      {prePlanContent}
+                    </ReactMarkdown>
+                  </div>
+                ) : null}
+                <ProposedPlanCard
+                  plan={plan}
+                  onImplement={onImplementPlan}
+                  isStreaming={false}
+                />
+              </>
+            ) : isStreamingPlan && streamingPlan ? (
+              // Streaming plan: render the ProposedPlanCard in streaming mode
+              <ProposedPlanCard
+                plan={streamingPlan}
+                isStreaming={true}
+              />
+            ) : message.content ? (
               <div ref={proseRef} className="prose prose-invert prose-sm max-w-none text-foreground">
                 <ReactMarkdown
                   remarkPlugins={REMARK_PLUGINS}
@@ -440,9 +487,11 @@ export const MessageBubble = memo(function MessageBubble({ message, isContinuati
   prev.message.isError === next.message.isError &&
   prev.message.checkpointId === next.message.checkpointId &&
   prev.message.isQueued === next.message.isQueued &&
+  prev.showThinking === next.showThinking &&
   prev.isContinuation === next.isContinuation &&
   prev.onRevert === next.onRevert &&
-  prev.onFullRevert === next.onFullRevert,
+  prev.onFullRevert === next.onFullRevert &&
+  prev.onImplementPlan === next.onImplementPlan,
 );
 
 /**

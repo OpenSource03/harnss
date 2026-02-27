@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ToolId } from "@/components/ToolPicker";
-import type { AcpPermissionBehavior } from "@/types";
+import type { AcpPermissionBehavior, EngineId } from "@/types";
 
 // ── Helpers ──
 
@@ -55,7 +55,13 @@ const MAX_SPLIT = 0.8;
 const DEFAULT_SPLIT = 0.5;
 
 const DEFAULT_MODEL = "claude-opus-4-6";
-const DEFAULT_PERMISSION_MODE = "plan";
+const DEFAULT_PERMISSION_MODE = "default";
+const DEFAULT_PLAN_MODE = true;
+const DEFAULT_ENGINE_MODELS: Record<EngineId, string> = {
+  claude: DEFAULT_MODEL,
+  acp: "",
+  codex: "",
+};
 
 const DEFAULT_TOOL_ORDER: ToolId[] = ["terminal", "git", "browser", "files", "mcp", "changes"];
 
@@ -63,6 +69,8 @@ const DEFAULT_TOOL_ORDER: ToolId[] = ["terminal", "git", "browser", "files", "mc
 
 export interface Settings {
   // Global
+  planMode: boolean;
+  setPlanMode: (enabled: boolean) => void;
   permissionMode: string;
   setPermissionMode: (mode: string) => void;
   acpPermissionBehavior: AcpPermissionBehavior;
@@ -73,6 +81,8 @@ export interface Settings {
   // Per-project
   model: string;
   setModel: (m: string) => void;
+  getModelForEngine: (engine: EngineId) => string;
+  setModelForEngine: (engine: EngineId, model: string) => void;
   gitCwd: string | null;
   setGitCwd: (path: string | null) => void;
   activeTools: Set<ToolId>;
@@ -103,12 +113,12 @@ export interface Settings {
 
 /** Read toolsSplitRatios, with migration from the old single-ratio key */
 function readToolsSplitRatios(pid: string): number[] {
-  const newKey = `openacpui-${pid}-tools-split-ratios`;
+  const newKey = `harnss-${pid}-tools-split-ratios`;
   const existing = readJson<number[]>(newKey, []);
   if (existing.length > 0) return existing;
 
   // Migrate from old single-ratio key
-  const oldKey = `openacpui-${pid}-tools-split`;
+  const oldKey = `harnss-${pid}-tools-split`;
   const oldRaw = localStorage.getItem(oldKey);
   if (oldRaw !== null) {
     const ratio = Number(oldRaw);
@@ -125,7 +135,7 @@ function readToolsSplitRatios(pid: string): number[] {
 
 /** Ensure toolOrder contains all known panel tools (filling in any missing ones) */
 function readToolOrder(pid: string): ToolId[] {
-  const stored = readJson<ToolId[]>(`openacpui-${pid}-tool-order`, []);
+  const stored = readJson<ToolId[]>(`harnss-${pid}-tool-order`, []);
   if (stored.length === 0) return [...DEFAULT_TOOL_ORDER];
   // Ensure all default tools appear (append any missing ones)
   const set = new Set(stored);
@@ -136,55 +146,134 @@ function readToolOrder(pid: string): ToolId[] {
   return result;
 }
 
-export function useSettings(projectId: string | null): Settings {
+function engineModelKey(pid: string, engine: EngineId): string {
+  return `harnss-${pid}-model-${engine}`;
+}
+
+function legacyModelKey(pid: string): string {
+  return `harnss-${pid}-model`;
+}
+
+function isCodexLikeModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return /^gpt[-\w.]*$/i.test(normalized) || /^o[0-9][\w.-]*$/i.test(normalized);
+}
+
+function readModelForEngine(pid: string, engine: EngineId): string {
+  const byEngine = localStorage.getItem(engineModelKey(pid, engine));
+  if (byEngine && byEngine.trim().length > 0) return byEngine.trim();
+
+  const legacy = localStorage.getItem(legacyModelKey(pid));
+  if (!legacy || legacy.trim().length === 0) return DEFAULT_ENGINE_MODELS[engine];
+  const legacyValue = legacy.trim();
+
+  if (engine === "claude") {
+    // Never inherit GPT/o-series values into Claude.
+    return isCodexLikeModel(legacyValue) ? DEFAULT_ENGINE_MODELS.claude : legacyValue;
+  }
+  if (engine === "codex") {
+    // Migrate older shared key only when it clearly looks like a Codex/OpenAI model.
+    return isCodexLikeModel(legacyValue) ? legacyValue : DEFAULT_ENGINE_MODELS.codex;
+  }
+  return DEFAULT_ENGINE_MODELS[engine];
+}
+
+function readEngineModels(pid: string): Record<EngineId, string> {
+  return {
+    claude: readModelForEngine(pid, "claude"),
+    acp: readModelForEngine(pid, "acp"),
+    codex: readModelForEngine(pid, "codex"),
+  };
+}
+
+export function useSettings(projectId: string | null, engine: EngineId = "claude"): Settings {
   const pid = projectId ?? "__none__";
 
   // ── Global settings ──
 
+  const [planMode, setPlanModeRaw] = useState(() => {
+    const stored = localStorage.getItem("harnss-plan-mode");
+    if (stored !== null) return stored === "true";
+    // Legacy migration: old builds encoded plan in permissionMode.
+    const legacyPermissionMode = localStorage.getItem("harnss-permission-mode");
+    if (legacyPermissionMode === "plan") return true;
+    return DEFAULT_PLAN_MODE;
+  });
+  const setPlanMode = useCallback((enabled: boolean) => {
+    setPlanModeRaw(enabled);
+    localStorage.setItem("harnss-plan-mode", String(enabled));
+  }, []);
+
   const [permissionMode, setPermissionModeRaw] = useState(() =>
-    localStorage.getItem("openacpui-permission-mode") ?? DEFAULT_PERMISSION_MODE,
+    (() => {
+      const stored = localStorage.getItem("harnss-permission-mode");
+      if (!stored || stored === "plan") return DEFAULT_PERMISSION_MODE;
+      return stored;
+    })(),
   );
   const setPermissionMode = useCallback((mode: string) => {
+    // Legacy fallback: treat selecting "plan" as enabling the dedicated plan toggle.
+    if (mode === "plan") {
+      setPlanModeRaw(true);
+      localStorage.setItem("harnss-plan-mode", "true");
+      mode = DEFAULT_PERMISSION_MODE;
+    }
     setPermissionModeRaw(mode);
-    localStorage.setItem("openacpui-permission-mode", mode);
+    localStorage.setItem("harnss-permission-mode", mode);
   }, []);
 
   const [acpPermissionBehavior, setAcpPermissionBehaviorRaw] = useState<AcpPermissionBehavior>(() =>
-    (localStorage.getItem("openacpui-acp-permission-behavior") as AcpPermissionBehavior) ?? "ask",
+    (localStorage.getItem("harnss-acp-permission-behavior") as AcpPermissionBehavior) ?? "ask",
   );
   const setAcpPermissionBehavior = useCallback((behavior: AcpPermissionBehavior) => {
     setAcpPermissionBehaviorRaw(behavior);
-    localStorage.setItem("openacpui-acp-permission-behavior", behavior);
+    localStorage.setItem("harnss-acp-permission-behavior", behavior);
   }, []);
 
   const [thinking, setThinkingRaw] = useState(() =>
-    readBool("openacpui-thinking", true),
+    readBool("harnss-thinking", true),
   );
   const setThinking = useCallback((on: boolean) => {
     setThinkingRaw(on);
-    localStorage.setItem("openacpui-thinking", String(on));
+    localStorage.setItem("harnss-thinking", String(on));
   }, []);
 
   // ── Per-project settings ──
 
-  const [model, setModelRaw] = useState(() =>
-    localStorage.getItem(`openacpui-${pid}-model`) ?? DEFAULT_MODEL,
+  const [modelsByEngine, setModelsByEngineRaw] = useState<Record<EngineId, string>>(() =>
+    readEngineModels(pid),
   );
-  const setModel = useCallback(
-    (m: string) => {
-      setModelRaw(m);
-      localStorage.setItem(`openacpui-${pid}-model`, m);
+  const model = modelsByEngine[engine] ?? DEFAULT_ENGINE_MODELS[engine];
+  const getModelForEngine = useCallback(
+    (targetEngine: EngineId) => modelsByEngine[targetEngine] ?? DEFAULT_ENGINE_MODELS[targetEngine],
+    [modelsByEngine],
+  );
+  const setModelForEngine = useCallback(
+    (targetEngine: EngineId, nextModel: string) => {
+      const normalized = nextModel.trim();
+      if (!normalized) return;
+      setModelsByEngineRaw((prev) => {
+        if (prev[targetEngine] === normalized) return prev;
+        localStorage.setItem(engineModelKey(pid, targetEngine), normalized);
+        return { ...prev, [targetEngine]: normalized };
+      });
     },
     [pid],
   );
+  const setModel = useCallback(
+    (nextModel: string) => {
+      setModelForEngine(engine, nextModel);
+    },
+    [engine, setModelForEngine],
+  );
 
   const [gitCwd, setGitCwdRaw] = useState<string | null>(() =>
-    localStorage.getItem(`openacpui-${pid}-git-cwd`),
+    localStorage.getItem(`harnss-${pid}-git-cwd`),
   );
   const setGitCwd = useCallback(
     (nextPath: string | null) => {
       setGitCwdRaw(nextPath);
-      const key = `openacpui-${pid}-git-cwd`;
+      const key = `harnss-${pid}-git-cwd`;
       if (nextPath && nextPath.trim()) localStorage.setItem(key, nextPath.trim());
       else localStorage.removeItem(key);
     },
@@ -192,14 +281,14 @@ export function useSettings(projectId: string | null): Settings {
   );
 
   const [activeTools, setActiveToolsRaw] = useState<Set<ToolId>>(() => {
-    const arr = readJson<ToolId[]>(`openacpui-${pid}-active-tools`, []);
+    const arr = readJson<ToolId[]>(`harnss-${pid}-active-tools`, []);
     return new Set(arr);
   });
   const setActiveTools = useCallback(
     (updater: Set<ToolId> | ((prev: Set<ToolId>) => Set<ToolId>)) => {
       setActiveToolsRaw((prev) => {
         const next = typeof updater === "function" ? updater(prev) : updater;
-        localStorage.setItem(`openacpui-${pid}-active-tools`, JSON.stringify([...next]));
+        localStorage.setItem(`harnss-${pid}-active-tools`, JSON.stringify([...next]));
         return next;
       });
     },
@@ -207,21 +296,21 @@ export function useSettings(projectId: string | null): Settings {
   );
 
   const [rightPanelWidth, setRightPanelWidth] = useState(() =>
-    readNumber(`openacpui-${pid}-right-panel-width`, DEFAULT_RIGHT_PANEL, MIN_RIGHT_PANEL, MAX_RIGHT_PANEL),
+    readNumber(`harnss-${pid}-right-panel-width`, DEFAULT_RIGHT_PANEL, MIN_RIGHT_PANEL, MAX_RIGHT_PANEL),
   );
   const rightPanelWidthRef = useRef(rightPanelWidth);
   rightPanelWidthRef.current = rightPanelWidth;
   const saveRightPanelWidth = useCallback(() => {
-    localStorage.setItem(`openacpui-${pid}-right-panel-width`, String(rightPanelWidthRef.current));
+    localStorage.setItem(`harnss-${pid}-right-panel-width`, String(rightPanelWidthRef.current));
   }, [pid]);
 
   const [toolsPanelWidth, setToolsPanelWidth] = useState(() =>
-    readNumber(`openacpui-${pid}-tools-panel-width`, DEFAULT_TOOLS_PANEL, MIN_TOOLS_PANEL, MAX_TOOLS_PANEL),
+    readNumber(`harnss-${pid}-tools-panel-width`, DEFAULT_TOOLS_PANEL, MIN_TOOLS_PANEL, MAX_TOOLS_PANEL),
   );
   const toolsPanelWidthRef = useRef(toolsPanelWidth);
   toolsPanelWidthRef.current = toolsPanelWidth;
   const saveToolsPanelWidth = useCallback(() => {
-    localStorage.setItem(`openacpui-${pid}-tools-panel-width`, String(toolsPanelWidthRef.current));
+    localStorage.setItem(`harnss-${pid}-tools-panel-width`, String(toolsPanelWidthRef.current));
   }, [pid]);
 
   // ── Tools split ratios (replaces old single toolsSplitRatio) ──
@@ -238,7 +327,7 @@ export function useSettings(projectId: string | null): Settings {
     [],
   );
   const saveToolsSplitRatios = useCallback(() => {
-    localStorage.setItem(`openacpui-${pid}-tools-split-ratios`, JSON.stringify(toolsSplitRatiosRef.current));
+    localStorage.setItem(`harnss-${pid}-tools-split-ratios`, JSON.stringify(toolsSplitRatiosRef.current));
   }, [pid]);
 
   // ── Tool order (display order in the tools column) ──
@@ -248,7 +337,7 @@ export function useSettings(projectId: string | null): Settings {
     (updater: ToolId[] | ((prev: ToolId[]) => ToolId[])) => {
       setToolOrderRaw((prev) => {
         const next = typeof updater === "function" ? updater(prev) : updater;
-        localStorage.setItem(`openacpui-${pid}-tool-order`, JSON.stringify(next));
+        localStorage.setItem(`harnss-${pid}-tool-order`, JSON.stringify(next));
         return next;
       });
     },
@@ -258,7 +347,7 @@ export function useSettings(projectId: string | null): Settings {
   // ── Right panel split (Tasks / Agents vertical ratio) ──
 
   const [rightSplitRatio, setRightSplitRatioRaw] = useState(() =>
-    readNumber(`openacpui-${pid}-right-split`, DEFAULT_SPLIT, MIN_SPLIT, MAX_SPLIT),
+    readNumber(`harnss-${pid}-right-split`, DEFAULT_SPLIT, MIN_SPLIT, MAX_SPLIT),
   );
   const rightSplitRatioRef = useRef(rightSplitRatio);
   rightSplitRatioRef.current = rightSplitRatio;
@@ -266,13 +355,13 @@ export function useSettings(projectId: string | null): Settings {
     setRightSplitRatioRaw(r);
   }, []);
   const saveRightSplitRatio = useCallback(() => {
-    localStorage.setItem(`openacpui-${pid}-right-split`, String(rightSplitRatioRef.current));
+    localStorage.setItem(`harnss-${pid}-right-split`, String(rightSplitRatioRef.current));
   }, [pid]);
 
   // ── Collapsed repos ──
 
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(() => {
-    const arr = readJson<string[]>(`openacpui-${pid}-collapsed-repos`, []);
+    const arr = readJson<string[]>(`harnss-${pid}-collapsed-repos`, []);
     return new Set(arr);
   });
   const toggleRepoCollapsed = useCallback(
@@ -281,7 +370,7 @@ export function useSettings(projectId: string | null): Settings {
         const next = new Set(prev);
         if (next.has(path)) next.delete(path);
         else next.add(path);
-        localStorage.setItem(`openacpui-${pid}-collapsed-repos`, JSON.stringify([...next]));
+        localStorage.setItem(`harnss-${pid}-collapsed-repos`, JSON.stringify([...next]));
         return next;
       });
     },
@@ -291,7 +380,7 @@ export function useSettings(projectId: string | null): Settings {
   // ── Suppressed panels ──
 
   const [suppressedPanels, setSuppressedPanels] = useState<Set<ToolId>>(() => {
-    const arr = readJson<ToolId[]>(`openacpui-${pid}-suppressed-panels`, []);
+    const arr = readJson<ToolId[]>(`harnss-${pid}-suppressed-panels`, []);
     return new Set(arr);
   });
   const suppressPanel = useCallback(
@@ -299,7 +388,7 @@ export function useSettings(projectId: string | null): Settings {
       setSuppressedPanels((prev) => {
         const next = new Set(prev);
         next.add(id);
-        localStorage.setItem(`openacpui-${pid}-suppressed-panels`, JSON.stringify([...next]));
+        localStorage.setItem(`harnss-${pid}-suppressed-panels`, JSON.stringify([...next]));
         return next;
       });
     },
@@ -311,7 +400,7 @@ export function useSettings(projectId: string | null): Settings {
         if (!prev.has(id)) return prev;
         const next = new Set(prev);
         next.delete(id);
-        localStorage.setItem(`openacpui-${pid}-suppressed-panels`, JSON.stringify([...next]));
+        localStorage.setItem(`harnss-${pid}-suppressed-panels`, JSON.stringify([...next]));
         return next;
       });
     },
@@ -321,32 +410,34 @@ export function useSettings(projectId: string | null): Settings {
   // ── Re-read per-project values when projectId changes ──
 
   useEffect(() => {
-    setModelRaw(localStorage.getItem(`openacpui-${pid}-model`) ?? DEFAULT_MODEL);
-    setGitCwdRaw(localStorage.getItem(`openacpui-${pid}-git-cwd`));
+    setModelsByEngineRaw(readEngineModels(pid));
+    setGitCwdRaw(localStorage.getItem(`harnss-${pid}-git-cwd`));
 
-    const tools = readJson<ToolId[]>(`openacpui-${pid}-active-tools`, []);
+    const tools = readJson<ToolId[]>(`harnss-${pid}-active-tools`, []);
     setActiveToolsRaw(new Set(tools));
 
     setRightPanelWidth(
-      readNumber(`openacpui-${pid}-right-panel-width`, DEFAULT_RIGHT_PANEL, MIN_RIGHT_PANEL, MAX_RIGHT_PANEL),
+      readNumber(`harnss-${pid}-right-panel-width`, DEFAULT_RIGHT_PANEL, MIN_RIGHT_PANEL, MAX_RIGHT_PANEL),
     );
     setToolsPanelWidth(
-      readNumber(`openacpui-${pid}-tools-panel-width`, DEFAULT_TOOLS_PANEL, MIN_TOOLS_PANEL, MAX_TOOLS_PANEL),
+      readNumber(`harnss-${pid}-tools-panel-width`, DEFAULT_TOOLS_PANEL, MIN_TOOLS_PANEL, MAX_TOOLS_PANEL),
     );
     setToolsSplitRatiosRaw(readToolsSplitRatios(pid));
     setToolOrderRaw(readToolOrder(pid));
     setRightSplitRatioRaw(
-      readNumber(`openacpui-${pid}-right-split`, DEFAULT_SPLIT, MIN_SPLIT, MAX_SPLIT),
+      readNumber(`harnss-${pid}-right-split`, DEFAULT_SPLIT, MIN_SPLIT, MAX_SPLIT),
     );
 
-    const repos = readJson<string[]>(`openacpui-${pid}-collapsed-repos`, []);
+    const repos = readJson<string[]>(`harnss-${pid}-collapsed-repos`, []);
     setCollapsedRepos(new Set(repos));
 
-    const suppressed = readJson<ToolId[]>(`openacpui-${pid}-suppressed-panels`, []);
+    const suppressed = readJson<ToolId[]>(`harnss-${pid}-suppressed-panels`, []);
     setSuppressedPanels(new Set(suppressed));
   }, [pid]);
 
   return {
+    planMode,
+    setPlanMode,
     permissionMode,
     setPermissionMode,
     acpPermissionBehavior,
@@ -355,6 +446,8 @@ export function useSettings(projectId: string | null): Settings {
     setThinking,
     model,
     setModel,
+    getModelForEngine,
+    setModelForEngine,
     gitCwd,
     setGitCwd,
     activeTools,

@@ -5,9 +5,10 @@
  * Each item type maps to a UIMessage role + toolName for the existing ToolCall UI.
  */
 
-import type { TodoItem, ModelInfo, ImageAttachment } from "@/types";
+import type { TodoItem, ModelInfo, ImageAttachment, ToolUseResult } from "@/types";
 import type { CodexThreadItem } from "@/types/codex";
 import type { Model as CodexModel } from "@/types/codex-protocol/v2/Model";
+import { parseUnifiedDiff } from "@/lib/unified-diff";
 
 // ── Streaming buffer (reuses ACPStreamingBuffer pattern) ──
 
@@ -57,11 +58,31 @@ export function codexItemToToolName(item: CodexThreadItem): string | null {
 /** Infer whether a fileChange is a Write (new file) or Edit (modify existing). */
 function inferFileChangeTool(item: Extract<CodexThreadItem, { type: "fileChange" }>): string {
   if (!item.changes || item.changes.length === 0) return "Edit";
-  // If any change has kind "create", treat as Write
-  const hasCreate = item.changes.some(
-    (c) => (c as Record<string, unknown>).kind === "create",
-  );
-  return hasCreate ? "Write" : "Edit";
+  const kinds = item.changes
+    .map((change) => getPatchChangeKind(change as Record<string, unknown>))
+    .filter((kind): kind is "add" | "delete" | "update" => kind !== null);
+  return kinds.length > 0 && kinds.every((kind) => kind === "add")
+    ? "Write"
+    : "Edit";
+}
+
+function getPatchChangeKind(change: Record<string, unknown>): "add" | "delete" | "update" | null {
+  const rawKind = change.kind;
+  if (typeof rawKind === "string") {
+    if (rawKind === "add" || rawKind === "create") return "add";
+    if (rawKind === "delete" || rawKind === "remove") return "delete";
+    if (rawKind === "update" || rawKind === "modify" || rawKind === "modified") return "update";
+    return null;
+  }
+
+  if (typeof rawKind === "object" && rawKind !== null) {
+    const kindType = (rawKind as Record<string, unknown>).type;
+    if (kindType === "add" || kindType === "delete" || kindType === "update") {
+      return kindType;
+    }
+  }
+
+  return null;
 }
 
 // ── Item → tool input mapping ──
@@ -76,12 +97,34 @@ export function codexItemToToolInput(item: CodexThreadItem): Record<string, unkn
       };
     case "fileChange": {
       const firstChange = item.changes?.[0] as Record<string, unknown> | undefined;
-      return {
+      const firstDiff = typeof firstChange?.diff === "string"
+        ? parseUnifiedDiff(firstChange.diff)
+        : null;
+      const firstKind = firstChange ? getPatchChangeKind(firstChange) : null;
+      const input: Record<string, unknown> = {
         file_path: firstChange?.path ?? "",
-        ...(item.changes?.length > 1
-          ? { description: `${item.changes.length} files` }
-          : {}),
       };
+
+      if (firstDiff) {
+        if (firstKind === "add") {
+          input.content = firstDiff.newString;
+        } else {
+          input.old_string = firstDiff.oldString;
+          input.new_string = firstDiff.newString;
+        }
+      } else if (typeof firstChange?.diff === "string" && firstChange.diff) {
+        // Fallback: diff is raw file content (not unified format) — derive old/new from kind
+        if (firstKind === "add") {
+          input.content = firstChange.diff;
+        } else if (firstKind === "delete") {
+          input.old_string = firstChange.diff;
+          input.new_string = "";
+        }
+      }
+      if (item.changes?.length && item.changes.length > 1) {
+        input.description = `${item.changes.length} files`;
+      }
+      return input;
     }
     case "mcpToolCall":
       return (item.arguments ?? {}) as Record<string, unknown>;
@@ -97,24 +140,75 @@ export function codexItemToToolInput(item: CodexThreadItem): Record<string, unkn
 // ── Item → tool result mapping ──
 
 /** Extract structured tool result from a completed Codex item. */
-export function codexItemToToolResult(item: CodexThreadItem): { content: string } | undefined {
+export function codexItemToToolResult(item: CodexThreadItem): ToolUseResult | undefined {
   switch (item.type) {
     case "commandExecution": {
-      const parts: string[] = [];
-      if (item.aggregatedOutput) parts.push(item.aggregatedOutput);
-      if (item.exitCode != null) parts.push(`\nExit code: ${item.exitCode}`);
-      if (item.durationMs != null) parts.push(`(${item.durationMs}ms)`);
-      return parts.length > 0 ? { content: parts.join("") } : undefined;
+      const lines: string[] = [];
+      if (item.aggregatedOutput) lines.push(item.aggregatedOutput);
+      if (item.exitCode != null) lines.push(`Exit code: ${item.exitCode}`);
+      if (item.durationMs != null) lines.push(`Duration: ${item.durationMs}ms`);
+      if (lines.length === 0) return undefined;
+
+      return {
+        type: "text",
+        stdout: lines.join("\n"),
+        ...(item.exitCode != null ? { exitCode: item.exitCode } : {}),
+        ...(item.durationMs != null ? { durationMs: item.durationMs } : {}),
+      };
     }
     case "fileChange": {
-      // Build a diff summary from changes
-      const diffs = (item.changes ?? [])
-        .map((c) => {
-          const change = c as Record<string, unknown>;
-          return change.diff ? String(change.diff) : `${change.kind ?? "modified"}: ${change.path}`;
+      const parsedChanges = (item.changes ?? []).map((rawChange) => {
+        const change = rawChange as Record<string, unknown>;
+        const diffText = typeof change.diff === "string" ? change.diff : "";
+        return {
+          filePath: typeof change.path === "string" ? change.path : "",
+          kind: getPatchChangeKind(change),
+          diffText,
+          parsedDiff: diffText ? parseUnifiedDiff(diffText) : null,
+        };
+      });
+
+      const firstParsed = parsedChanges.find((change) => change.parsedDiff) ?? null;
+      const firstPath = parsedChanges.find((change) => change.filePath)?.filePath ?? "";
+      const diffSummary = parsedChanges
+        .map((change) => {
+          if (change.diffText) return change.diffText;
+          const kindLabel = change.kind ?? "modified";
+          return `${kindLabel}: ${change.filePath}`;
         })
-        .join("\n");
-      return diffs ? { content: diffs } : undefined;
+        .join("\n\n");
+      if (!diffSummary) return undefined;
+
+      const result: ToolUseResult = {
+        content: diffSummary,
+        ...(firstPath ? { filePath: firstPath } : {}),
+        structuredPatch: parsedChanges.map((change) => ({
+          filePath: change.filePath,
+          kind: change.kind,
+          diff: change.diffText,
+          // When parseUnifiedDiff fails (raw content), derive old/new from kind
+          oldString: change.parsedDiff?.oldString
+            ?? (change.kind === "delete" ? change.diffText : undefined),
+          newString: change.parsedDiff?.newString
+            ?? (change.kind === "add" ? change.diffText : undefined),
+        })),
+      };
+      const firstWithDiff = firstParsed
+        ?? parsedChanges.find((change) => change.diffText);
+      if (firstParsed?.parsedDiff) {
+        result.oldString = firstParsed.parsedDiff.oldString;
+        result.newString = firstParsed.parsedDiff.newString;
+      } else if (firstWithDiff) {
+        // Fallback: derive from kind when unified diff parsing failed
+        if (firstWithDiff.kind === "delete") {
+          result.oldString = firstWithDiff.diffText;
+          result.newString = "";
+        } else if (firstWithDiff.kind === "add") {
+          result.oldString = "";
+          result.newString = firstWithDiff.diffText;
+        }
+      }
+      return result;
     }
     case "mcpToolCall": {
       if (item.error) {
@@ -134,24 +228,27 @@ export function codexItemToToolResult(item: CodexThreadItem): { content: string 
 
 /**
  * Map Codex approval policy names to UI-friendly labels.
- * Codex uses: "onRequest" | "unlessTrusted" | "never"
+ * Codex uses: "untrusted" | "on-failure" | "on-request" | "reject" | "never"
  */
 export const CODEX_APPROVAL_LABELS: Record<string, string> = {
-  onRequest: "Ask First",
-  unlessTrusted: "Accept Trusted",
+  "on-request": "Ask First",
+  untrusted: "Accept Trusted",
+  "on-failure": "Ask On Failure",
+  reject: "Reject",
   never: "Allow All",
 };
 
-/** Map our permission mode names to Codex approval policy values. */
+/**
+ * Map Harnss permission modes to Codex approvalPolicy values.
+ * Keep this in sync with src/types/codex-protocol/v2/AskForApproval.ts.
+ */
 export function permissionModeToCodexPolicy(mode: string): string | undefined {
   switch (mode) {
     case "default":
-    case "plan":
-      return "onRequest";
+      return "on-request";
     case "acceptEdits":
-      return "unlessTrusted";
+      return "untrusted";
     case "bypassPermissions":
-    case "dontAsk":
       return "never";
     default:
       return undefined;

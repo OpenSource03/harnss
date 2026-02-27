@@ -301,12 +301,12 @@ export const FilesPanel = memo(function FilesPanel({
 
       {files.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-4">
-          <p className="text-center text-xs text-muted-foreground/60">
+          <p className="text-center text-xs text-muted-foreground/70">
             Files accessed during this session will appear here
           </p>
         </div>
       ) : (
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="flex flex-col py-1">
             {files.map((file) => {
               const Icon = ACCESS_ICON[file.accessType];
@@ -330,13 +330,13 @@ export const FilesPanel = memo(function FilesPanel({
                             {fileName}
                           </span>
                           {rangeText && (
-                            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
+                            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">
                               {rangeText}
                             </span>
                           )}
                         </div>
                         {dirPath && (
-                          <div className="truncate text-[10px] text-muted-foreground/60">
+                          <div className="truncate text-[10px] text-muted-foreground/70">
                             {dirPath}
                           </div>
                         )}

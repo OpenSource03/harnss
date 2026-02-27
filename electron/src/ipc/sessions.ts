@@ -14,6 +14,7 @@ interface SessionMeta {
   model?: string;
   totalCost?: number;
   engine?: "claude" | "acp" | "codex";
+  codexThreadId?: string;
 }
 
 interface SearchResult {
@@ -100,6 +101,7 @@ export function register(): void {
             model: data.model,
             totalCost: data.totalCost || 0,
             engine: data.engine,
+            codexThreadId: data.codexThreadId,
           });
         } catch {
           // Skip corrupted files

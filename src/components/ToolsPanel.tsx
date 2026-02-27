@@ -76,8 +76,8 @@ export function ToolsPanel({ cwd }: ToolsPanelProps) {
       {/* Header with tabs */}
       <div className="flex items-center gap-1 px-2 pt-2 pb-1">
         <div className="flex items-center gap-1.5 ps-1.5">
-          <TerminalIcon className="h-3.5 w-3.5 text-foreground/40" />
-          <span className="text-xs font-medium text-foreground/50">Tools</span>
+          <TerminalIcon className="h-3.5 w-3.5 text-foreground/50" />
+          <span className="text-xs font-medium text-foreground/60">Tools</span>
         </div>
 
         <div className="ms-2 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
@@ -88,8 +88,8 @@ export function ToolsPanel({ cwd }: ToolsPanelProps) {
               onClick={() => setActiveTabId(tab.id)}
               className={`group flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors cursor-pointer ${
                 tab.id === activeTabId
-                  ? "bg-foreground/[0.08] text-foreground/80"
-                  : "text-foreground/35 hover:text-foreground/55 hover:bg-foreground/[0.04]"
+                  ? "bg-foreground/[0.08] text-foreground/90"
+                  : "text-foreground/45 hover:text-foreground/65 hover:bg-foreground/[0.04]"
               }`}
             >
               <ChevronDown className="h-2.5 w-2.5 opacity-50" />
@@ -118,7 +118,7 @@ export function ToolsPanel({ cwd }: ToolsPanelProps) {
         <Button
           variant="ghost"
           size="icon"
-          className="h-5 w-5 shrink-0 text-foreground/30 hover:text-foreground/60"
+          className="h-5 w-5 shrink-0 text-foreground/40 hover:text-foreground/70"
           onClick={createTerminal}
         >
           <Plus className="h-3 w-3" />
@@ -126,7 +126,7 @@ export function ToolsPanel({ cwd }: ToolsPanelProps) {
       </div>
 
       {/* Separator */}
-      <div className="border-t border-foreground/[0.06]" />
+      <div className="border-t border-foreground/[0.08]" />
 
       {/* Terminal content */}
       <div className="relative min-h-0 flex-1">
@@ -143,7 +143,7 @@ export function ToolsPanel({ cwd }: ToolsPanelProps) {
             <button
               type="button"
               onClick={createTerminal}
-              className="flex items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground/30 transition-colors hover:bg-foreground/[0.04] hover:text-foreground/50 cursor-pointer"
+              className="flex items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground/40 transition-colors hover:bg-foreground/[0.04] hover:text-foreground/60 cursor-pointer"
             >
               <Plus className="h-3.5 w-3.5" />
               New Terminal

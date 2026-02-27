@@ -5,7 +5,7 @@
  * startup before any BrowserWindow exists. Use it for settings that the
  * main process needs synchronously (e.g. autoUpdater.allowPrerelease).
  *
- * File location: {userData}/openacpui-data/settings.json
+ * File location: {userData}/openacpui-data/settings.json (kept as openacpui-data for backward compat)
  */
 
 import path from "path";

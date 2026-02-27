@@ -10,6 +10,7 @@ import type { ACPSessionEvent, ACPPermissionEvent, ACPTurnCompleteEvent, ACPConf
 import type { EngineId, PermissionBehavior } from "./engine";
 import type { CodexSessionEvent, CodexApprovalRequest, CodexExitEvent } from "./codex";
 import type { Model as CodexModel } from "./codex-protocol/v2/Model";
+import type { CollaborationMode } from "./codex-protocol/CollaborationMode";
 
 interface SessionListItem {
   id: string;
@@ -21,6 +22,7 @@ interface SessionListItem {
   model?: string;
   totalCost: number;
   engine?: EngineId;
+  codexThreadId?: string;
 }
 
 type CodexImageInput = { type: "image"; url: string } | { type: "localImage"; path: string };
@@ -34,6 +36,7 @@ declare global {
         cwd?: string;
         model?: string;
         permissionMode?: string;
+        thinkingEnabled?: boolean;
         resume?: string;
         /** Fork to a new session ID when resuming (model forgets messages after resumeSessionAt) */
         forkSession?: boolean;
@@ -45,9 +48,11 @@ declare global {
         sessionId: string,
         message: { type: string; message: { role: string; content: string | Array<{ type: string; [key: string]: unknown }> } },
       ) => Promise<{ ok?: boolean; error?: string }>;
-      stop: (sessionId: string) => Promise<{ ok: boolean }>;
+      stop: (sessionId: string, reason?: string) => Promise<{ ok: boolean }>;
       interrupt: (sessionId: string) => Promise<{ ok?: boolean; error?: string }>;
       supportedModels: (sessionId: string) => Promise<{ models: ModelInfo[]; error?: string }>;
+      modelsCacheGet: () => Promise<{ models: ModelInfo[]; updatedAt?: number; error?: string }>;
+      modelsCacheRevalidate: (options?: { cwd?: string }) => Promise<{ models: ModelInfo[]; updatedAt?: number; error?: string }>;
       mcpStatus: (sessionId: string) => Promise<{ servers: McpServerStatus[]; error?: string }>;
       mcpReconnect: (sessionId: string, serverName: string) => Promise<{ ok?: boolean; error?: string; restarted?: boolean }>;
       revertFiles: (sessionId: string, checkpointId: string) => Promise<{ ok?: boolean; error?: string }>;
@@ -90,6 +95,10 @@ declare global {
       setModel: (
         sessionId: string,
         model: string,
+      ) => Promise<{ ok?: boolean; error?: string }>;
+      setThinking: (
+        sessionId: string,
+        thinkingEnabled: boolean,
       ) => Promise<{ ok?: boolean; error?: string }>;
       projects: {
         list: () => Promise<Project[]>;
@@ -194,7 +203,8 @@ declare global {
         onExit: (callback: (data: { _sessionId: string; code: number | null; error?: string }) => void) => () => void;
       };
       codex: {
-        start: (options: { cwd: string; model?: string; approvalPolicy?: string; personality?: string }) =>
+        log: (label: string, data: unknown) => void;
+        start: (options: { cwd: string; model?: string; approvalPolicy?: string; personality?: string; collaborationMode?: CollaborationMode }) =>
           Promise<{
             sessionId?: string;
             threadId?: string;
@@ -204,7 +214,7 @@ declare global {
             needsAuth?: boolean;
             error?: string;
           }>;
-        send: (sessionId: string, text: string, images?: CodexImageInput[], effort?: string) =>
+        send: (sessionId: string, text: string, images?: CodexImageInput[], effort?: string, collaborationMode?: CollaborationMode) =>
           Promise<{ turnId?: string; error?: string }>;
         stop: (sessionId: string) => Promise<void>;
         interrupt: (sessionId: string) => Promise<{ error?: string }>;
@@ -214,7 +224,7 @@ declare global {
         listModels: () => Promise<{ models: CodexModel[]; error?: string }>;
         authStatus: () => Promise<{ account: unknown; requiresOpenaiAuth: boolean }>;
         login: (sessionId: string, type: "apiKey" | "chatgpt", apiKey?: string) => Promise<unknown>;
-        resume: (options: { cwd: string; threadId: string; model?: string }) =>
+        resume: (options: { cwd: string; threadId: string; model?: string; approvalPolicy?: string }) =>
           Promise<{ sessionId?: string; threadId?: string; error?: string }>;
         setModel: (sessionId: string, model: string) => Promise<{ error?: string }>;
         version: () => Promise<{ version?: string; error?: string }>;

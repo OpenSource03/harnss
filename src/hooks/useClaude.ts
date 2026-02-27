@@ -505,6 +505,8 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
             const toolResult = rawContent[0];
             const toolUseId = toolResult.tool_use_id;
             const isError = !!toolResult.is_error;
+            const toolCallId = `tool-${toolUseId}`;
+            const toolName = messagesRef.current.find((m) => m.id === toolCallId)?.toolName;
             const resultMeta = normalizeToolResult(event.tool_use_result, toolResult.content);
             uiLog("TOOL_RESULT", {
               tool_use_id: toolUseId?.slice(0, 12),
@@ -515,7 +517,7 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
 
             setMessages((prev) =>
               prev.map((m) => {
-                if (m.id !== `tool-${toolUseId}`) return m;
+                if (m.id !== toolCallId) return m;
                 if (m.toolName === "Task" && resultMeta) {
                   return {
                     ...m,
@@ -530,6 +532,12 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
                 return { ...m, toolResult: resultMeta, toolError: isError || undefined };
               }),
             );
+
+            if (!isError && toolName === "EnterPlanMode") {
+              setSessionInfo((prev) =>
+                prev ? { ...prev, permissionMode: "plan" } : prev,
+              );
+            }
             break;
           }
 
@@ -723,7 +731,7 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
 
   const stop = useCallback(async () => {
     if (!sessionIdRef.current) return;
-    await window.claude.stop(sessionIdRef.current);
+    await window.claude.stop(sessionIdRef.current, "user");
     setIsConnected(false);
     setIsProcessing(false);
     setIsCompacting(false);
@@ -843,6 +851,11 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
     return result;
   }, []);
 
+  const setThinkingEnabled = useCallback(async (thinkingEnabled: boolean) => {
+    if (!sessionIdRef.current) return { error: "No session" };
+    return window.claude.setThinking(sessionIdRef.current, thinkingEnabled);
+  }, []);
+
   const compact = useCallback(async () => {
     if (!sessionIdRef.current) return;
     setIsCompacting(true);
@@ -923,6 +936,7 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
     respondPermission,
     setPermissionMode,
     setModel,
+    setThinkingEnabled,
     mcpServerStatuses,
     refreshMcpStatus,
     reconnectMcpServer,

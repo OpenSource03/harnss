@@ -12,13 +12,18 @@ interface DiffViewerProps {
   oldString: string;
   newString: string;
   filePath: string;
+  unifiedDiff?: string;
+  /** Fill parent height instead of capping at max-h (used in ChangesPanel) */
+  fillHeight?: boolean;
 }
 
 interface DiffLine {
   type: "added" | "removed" | "context";
   content: string;
-  lineNum?: number;
+  oldLineNum?: number;
+  newLineNum?: number;
   highlights?: WordHighlight[];
+  isGap?: boolean;
 }
 
 interface CollapsedLine {
@@ -64,7 +69,7 @@ const HighlightedCode = memo(function HighlightedCode({
 
 // ── Main component ──
 
-export function DiffViewer({ oldString, newString, filePath }: DiffViewerProps) {
+export function DiffViewer({ oldString, newString, filePath, unifiedDiff, fillHeight }: DiffViewerProps) {
   const [fullFileContent, setFullFileContent] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
@@ -72,8 +77,10 @@ export function DiffViewer({ oldString, newString, filePath }: DiffViewerProps) 
   const fileName = filePath.split("/").pop() ?? filePath;
   const language = getLanguageFromPath(filePath);
 
-  // Auto-load full file on mount
+  // Auto-load full file only when we need reconstruction fallback.
   useEffect(() => {
+    if (!filePath || unifiedDiff) return;
+
     let cancelled = false;
     window.claude
       .readFile(filePath)
@@ -88,15 +95,23 @@ export function DiffViewer({ oldString, newString, filePath }: DiffViewerProps) 
     return () => {
       cancelled = true;
     };
-  }, [filePath]);
+  }, [filePath, unifiedDiff]);
+
+  const parsedUnifiedDiff = useMemo(
+    () => (unifiedDiff ? computeDiffLinesFromUnifiedDiff(unifiedDiff) : null),
+    [unifiedDiff],
+  );
 
   // Compute raw diff lines
   const { allLines, stats } = useMemo(() => {
+    if (parsedUnifiedDiff) {
+      return parsedUnifiedDiff;
+    }
     if (fullFileContent !== null) {
       return computeFullFileDiff(fullFileContent, oldString, newString);
     }
     return computeDiffLines(oldString, newString);
-  }, [oldString, newString, fullFileContent]);
+  }, [oldString, newString, fullFileContent, parsedUnifiedDiff]);
 
   // Collapse context runs (respecting expanded sections)
   const displayLines = useMemo(
@@ -115,9 +130,11 @@ export function DiffViewer({ oldString, newString, filePath }: DiffViewerProps) 
   }, [newString]);
 
   return (
-    <div className="rounded-lg border border-border/50 overflow-hidden font-mono text-[12px] leading-[1.55] bg-black/20">
+    <div className={`overflow-hidden font-mono text-[12px] leading-[1.55] bg-black/20 ${
+      fillHeight ? "flex flex-col h-full" : "rounded-lg border border-border/50"
+    }`}>
       {/* Header */}
-      <div className="group/diff flex items-center gap-3 px-3 py-1.5 bg-foreground/[0.04] border-b border-border/40">
+      <div className="group/diff flex items-center gap-3 px-3 py-1.5 bg-foreground/[0.04] border-b border-border/40 shrink-0">
         <span className="text-foreground/80 truncate flex-1">{fileName}</span>
         <OpenInEditorButton filePath={filePath} className="group-hover/diff:text-foreground/25" />
 
@@ -144,7 +161,7 @@ export function DiffViewer({ oldString, newString, filePath }: DiffViewerProps) 
       </div>
 
       {/* Diff body */}
-      <div className="overflow-auto max-h-[28rem]">
+      <div className={fillHeight ? "overflow-auto flex-1 min-h-0" : "overflow-auto max-h-[28rem]"}>
         {displayLines.map((line, i) =>
           line.type === "collapsed" ? (
             <CollapsedRow
@@ -163,7 +180,25 @@ export function DiffViewer({ oldString, newString, filePath }: DiffViewerProps) 
 
 // ── Diff line row ──
 
-function DiffLineRow({ line, language }: { line: DiffLine; language: string }) {
+function DiffLineRow({
+  line,
+  language,
+}: {
+  line: DiffLine;
+  language: string;
+}) {
+  if (line.isGap) {
+    return (
+      <div className="flex border-s-2 border-s-transparent bg-foreground/[0.03]">
+        <span className="w-10 shrink-0 text-right pe-3 py-px select-none text-muted-foreground/25" />
+        <span className="w-10 shrink-0 text-right pe-3 py-px select-none text-muted-foreground/25" />
+        <span className="flex-1 px-3 py-px text-[10px] italic text-foreground/35">
+          {line.content}
+        </span>
+      </div>
+    );
+  }
+
   // Left accent: thin colored border on changed lines
   const accentClass =
     line.type === "removed"
@@ -179,12 +214,15 @@ function DiffLineRow({ line, language }: { line: DiffLine; language: string }) {
         ? "bg-emerald-500/[0.14]"
         : "";
 
-  const numClass =
+  const oldNumClass =
     line.type === "removed"
-      ? "text-red-400/50"
-      : line.type === "added"
-        ? "text-emerald-400/50"
-        : "text-muted-foreground/35";
+      ? "text-red-400/55"
+      : "text-muted-foreground/35";
+
+  const newNumClass =
+    line.type === "added"
+      ? "text-emerald-400/55"
+      : "text-muted-foreground/35";
 
   const contentClass =
     line.type === "removed"
@@ -195,11 +233,17 @@ function DiffLineRow({ line, language }: { line: DiffLine; language: string }) {
 
   return (
     <div className={`flex ${accentClass} ${bgClass}`}>
-      {/* Line number */}
+      {/* Old line number */}
       <span
-        className={`w-10 shrink-0 text-right pe-3 py-px select-none ${numClass}`}
+        className={`w-10 shrink-0 text-right pe-3 py-px select-none ${oldNumClass}`}
       >
-        {line.lineNum ?? ""}
+        {line.oldLineNum ?? ""}
+      </span>
+      {/* New line number */}
+      <span
+        className={`w-10 shrink-0 text-right pe-3 py-px select-none ${newNumClass}`}
+      >
+        {line.newLineNum ?? ""}
       </span>
       {/* Content — syntax highlighted with diff background colors */}
       <span
@@ -273,33 +317,21 @@ function computeDiffLines(
       const nextChange = changes[i + 1];
       const hasMatchingAdd = nextChange?.added === true;
       const addedLines = hasMatchingAdd ? splitLines(nextChange.value) : [];
-      const maxPaired = Math.min(changeLines.length, addedLines.length);
-
       for (let j = 0; j < changeLines.length; j++) {
-        const wordDiffs =
-          j < maxPaired
-            ? computeWordHighlights(changeLines[j], addedLines[j])
-            : undefined;
         result.push({
           type: "removed",
           content: changeLines[j],
-          lineNum: oldNum++,
-          highlights: wordDiffs?.removed,
+          oldLineNum: oldNum++,
         });
       }
 
       if (hasMatchingAdd) {
         added += addedLines.length;
         for (let j = 0; j < addedLines.length; j++) {
-          const wordDiffs =
-            j < maxPaired
-              ? computeWordHighlights(changeLines[j], addedLines[j])
-              : undefined;
           result.push({
             type: "added",
             content: addedLines[j],
-            lineNum: newNum++,
-            highlights: wordDiffs?.added,
+            newLineNum: newNum++,
           });
         }
         i++;
@@ -307,21 +339,205 @@ function computeDiffLines(
     } else if (change.added) {
       added += changeLines.length;
       for (const line of changeLines) {
-        result.push({ type: "added", content: line, lineNum: newNum++ });
+        result.push({ type: "added", content: line, newLineNum: newNum++ });
       }
     } else {
       for (const line of changeLines) {
         result.push({
           type: "context",
           content: line,
-          lineNum: newNum++,
+          oldLineNum: oldNum++,
+          newLineNum: newNum++,
         });
-        oldNum++;
       }
     }
   }
 
-  return { allLines: result, stats: { added, removed } };
+  return { allLines: pairAndInterleaveChangedRuns(result), stats: { added, removed } };
+}
+
+const DIFF_META_PREFIXES = [
+  "diff --git ",
+  "index ",
+  "--- ",
+  "+++ ",
+  "*** ",
+] as const;
+
+function normalizeDiffText(text: string): string {
+  if (!text) return text;
+  if (!text.includes("\n") && text.includes("\\n")) {
+    return text.replace(/\\n/g, "\n");
+  }
+  return text;
+}
+
+function tryExtractContentField(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as { content?: unknown };
+    return typeof parsed.content === "string" ? parsed.content : null;
+  } catch {
+    return null;
+  }
+}
+
+function pairAndInterleaveChangedRuns(lines: DiffLine[]): DiffLine[] {
+  const ordered: DiffLine[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.type !== "removed") {
+      ordered.push(line);
+      i++;
+      continue;
+    }
+
+    const removedStart = i;
+    while (i < lines.length && lines[i].type === "removed") i++;
+    const addedStart = i;
+    while (i < lines.length && lines[i].type === "added") i++;
+
+    const removedRun = lines.slice(removedStart, addedStart);
+    const addedRun = lines.slice(addedStart, i);
+
+    if (addedRun.length === 0) {
+      ordered.push(...removedRun);
+      continue;
+    }
+
+    const paired = Math.min(removedRun.length, addedRun.length);
+
+    for (let j = 0; j < paired; j++) {
+      const removedLine = removedRun[j];
+      const addedLine = addedRun[j];
+      const wordDiff = computeWordHighlights(removedLine.content, addedLine.content);
+      ordered.push({
+        ...removedLine,
+        highlights: wordDiff.removed,
+      });
+      ordered.push({
+        ...addedLine,
+        highlights: wordDiff.added,
+      });
+    }
+
+    for (let j = paired; j < removedRun.length; j++) {
+      ordered.push(removedRun[j]);
+    }
+    for (let j = paired; j < addedRun.length; j++) {
+      ordered.push(addedRun[j]);
+    }
+  }
+
+  return ordered;
+}
+
+function computeDiffLinesFromUnifiedDiff(
+  diffText: string,
+): { allLines: DiffLine[]; stats: { added: number; removed: number } } | null {
+  if (!diffText) return null;
+
+  let normalizedText = normalizeDiffText(diffText);
+  const contentField = tryExtractContentField(normalizedText);
+  if (contentField) normalizedText = normalizeDiffText(contentField);
+
+  const lines = normalizedText.replace(/\r\n/g, "\n").split("\n");
+  const result: DiffLine[] = [];
+  let oldNum = 1;
+  let newNum = 1;
+  let inHunk = false;
+  let sawHunk = false;
+  let added = 0;
+  let removed = 0;
+
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      const match = line.match(/^@@\s*-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s*@@/);
+      if (match) {
+        const nextOldStart = Number(match[1]);
+        const nextNewStart = Number(match[2]);
+        if (sawHunk) {
+          const omittedOld = Math.max(0, nextOldStart - oldNum);
+          const omittedNew = Math.max(0, nextNewStart - newNum);
+          const omitted = Math.max(omittedOld, omittedNew);
+          if (omitted > 0) {
+            result.push({
+              type: "context",
+              content: `... ${omitted} unchanged line${omitted !== 1 ? "s" : ""} omitted ...`,
+              isGap: true,
+            });
+          }
+        }
+        oldNum = nextOldStart;
+        newNum = nextNewStart;
+        inHunk = true;
+        sawHunk = true;
+      } else {
+        inHunk = false;
+      }
+      continue;
+    }
+
+    if (!inHunk) {
+      if (DIFF_META_PREFIXES.some((prefix) => line.startsWith(prefix))) continue;
+      continue;
+    }
+
+    if (DIFF_META_PREFIXES.some((prefix) => line.startsWith(prefix))) {
+      inHunk = false;
+      continue;
+    }
+
+    if (line === "\\ No newline at end of file") continue;
+
+    if (line.startsWith("+")) {
+      result.push({
+        type: "added",
+        content: line.slice(1),
+        newLineNum: newNum++,
+      });
+      added += 1;
+      continue;
+    }
+
+    if (line.startsWith("-")) {
+      result.push({
+        type: "removed",
+        content: line.slice(1),
+        oldLineNum: oldNum++,
+      });
+      removed += 1;
+      continue;
+    }
+
+    if (line.startsWith(" ")) {
+      const content = line.slice(1);
+      result.push({
+        type: "context",
+        content,
+        oldLineNum: oldNum++,
+        newLineNum: newNum++,
+      });
+      continue;
+    }
+
+    // Fallback for non-prefixed lines inside hunk-like payloads.
+    result.push({
+      type: "context",
+      content: line,
+      oldLineNum: oldNum++,
+      newLineNum: newNum++,
+    });
+  }
+
+  if (!sawHunk || result.length === 0) return null;
+  return {
+    allLines: pairAndInterleaveChangedRuns(result),
+    stats: { added, removed },
+  };
 }
 
 function computeFullFileDiff(
@@ -374,7 +590,7 @@ function collapseContext(
   };
 
   for (const line of lines) {
-    if (line.type === "context") {
+    if (line.type === "context" && !line.isGap) {
       if (contextRun.length === 0) contextStartIdx = result.length;
       contextRun.push(line);
     } else {

@@ -43,7 +43,7 @@ function WritePreview({ change }: { change: FileChange }) {
 
   if (!content) {
     return (
-      <div className="flex items-center justify-center p-8 text-sm text-muted-foreground/50">
+      <div className="flex items-center justify-center p-8 text-sm text-muted-foreground/60">
         Empty file
       </div>
     );
@@ -97,14 +97,14 @@ const FileRow = memo(function FileRow({
       className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-start text-xs transition-colors cursor-pointer rounded-md ${
         isSelected
           ? "bg-foreground/[0.08] text-foreground"
-          : "text-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground/80"
+          : "text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground/90"
       }`}
     >
       <Icon className={`h-3.5 w-3.5 shrink-0 ${color}`} strokeWidth={2} />
       <span className="flex-1 min-w-0 truncate">
         <span className="font-medium">{change.fileName}</span>
         {dir && (
-          <span className="ms-1 text-muted-foreground/40 text-[10px]">{dir}</span>
+          <span className="ms-1 text-muted-foreground/50 text-[10px]">{dir}</span>
         )}
       </span>
     </button>
@@ -199,14 +199,14 @@ export const ChangesPanel = memo(function ChangesPanel({
     return (
       <div className="flex h-full flex-col">
         <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/40 shrink-0">
-          <FileDiff className="h-4 w-4 text-muted-foreground/60" />
-          <span className="text-sm font-medium text-foreground/80">Changes</span>
+          <FileDiff className="h-4 w-4 text-muted-foreground/70" />
+          <span className="text-sm font-medium text-foreground/90">Changes</span>
         </div>
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center px-4">
-            <FileText className="h-8 w-8 text-muted-foreground/20 mx-auto mb-2" />
-            <p className="text-sm text-muted-foreground/40">No file changes yet</p>
-            <p className="text-xs text-muted-foreground/25 mt-1">
+            <FileText className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground/50">No file changes yet</p>
+            <p className="text-xs text-muted-foreground/35 mt-1">
               File modifications will appear here after each turn
             </p>
           </div>
@@ -219,8 +219,8 @@ export const ChangesPanel = memo(function ChangesPanel({
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border/40 shrink-0">
-        <FileDiff className="h-4 w-4 text-muted-foreground/60" />
-        <span className="text-sm font-medium text-foreground/80">Changes</span>
+        <FileDiff className="h-4 w-4 text-muted-foreground/70" />
+        <span className="text-sm font-medium text-foreground/90">Changes</span>
         <div className="ms-auto flex items-center">
           <ViewToggle mode={viewMode} onChange={setViewMode} />
         </div>
@@ -263,25 +263,24 @@ export const ChangesPanel = memo(function ChangesPanel({
           </ScrollArea>
         </div>
 
-        {/* Diff / content viewer */}
-        <div className="flex-1 min-w-0 overflow-hidden">
+        {/* Diff / content viewer — no outer ScrollArea; DiffViewer and
+             WritePreview handle their own overflow to avoid double scrollbars */}
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {selectedChange ? (
-            <ScrollArea className="h-full">
-              <div className="p-0">
-                {selectedChange.toolName === "Edit" ? (
-                  <DiffViewer
-                    oldString={selectedChange.oldString ?? ""}
-                    newString={selectedChange.newString ?? ""}
-                    filePath={selectedChange.filePath}
-                  />
-                ) : (
-                  <WritePreview change={selectedChange} />
-                )}
-              </div>
-            </ScrollArea>
+            selectedChange.toolName === "Edit" ? (
+              <DiffViewer
+                oldString={selectedChange.oldString ?? ""}
+                newString={selectedChange.newString ?? ""}
+                filePath={selectedChange.filePath}
+                unifiedDiff={selectedChange.unifiedDiff}
+                fillHeight
+              />
+            ) : (
+              <WritePreview change={selectedChange} />
+            )
           ) : (
             <div className="flex h-full items-center justify-center">
-              <p className="text-sm text-muted-foreground/30">Select a file to view changes</p>
+              <p className="text-sm text-muted-foreground/40">Select a file to view changes</p>
             </div>
           )}
         </div>
@@ -310,7 +309,7 @@ function TurnGroup({
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-1.5 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground/50 hover:text-muted-foreground/70 transition-colors cursor-pointer"
+        className="flex w-full items-center gap-1.5 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground/60 hover:text-muted-foreground/80 transition-colors cursor-pointer"
       >
         <ChevronRight
           className={`h-3 w-3 shrink-0 transition-transform duration-150 ${
@@ -318,7 +317,7 @@ function TurnGroup({
           }`}
         />
         <span>Turn {turn.turnIndex + 1}</span>
-        <span className="ms-auto text-muted-foreground/30">
+        <span className="ms-auto text-muted-foreground/40">
           {turn.fileCount} file{turn.fileCount !== 1 ? "s" : ""}
         </span>
       </button>
@@ -354,8 +353,8 @@ function ViewToggle({
         onClick={() => onChange("per-turn")}
         className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
           mode === "per-turn"
-            ? "bg-foreground/10 text-foreground/80 shadow-sm"
-            : "text-muted-foreground/50 hover:text-muted-foreground/70"
+            ? "bg-foreground/10 text-foreground/90 shadow-sm"
+            : "text-muted-foreground/60 hover:text-muted-foreground/80"
         }`}
       >
         Per turn
@@ -365,8 +364,8 @@ function ViewToggle({
         onClick={() => onChange("cumulative")}
         className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
           mode === "cumulative"
-            ? "bg-foreground/10 text-foreground/80 shadow-sm"
-            : "text-muted-foreground/50 hover:text-muted-foreground/70"
+            ? "bg-foreground/10 text-foreground/90 shadow-sm"
+            : "text-muted-foreground/60 hover:text-muted-foreground/80"
         }`}
       >
         All

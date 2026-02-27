@@ -30,8 +30,8 @@ interface CodexSession {
 const codexSessions = new Map<string, CodexSession>();
 function getAppServerClientInfo(): { name: string; title: string; version: string } {
   return {
-    name: "openacpui",
-    title: "OpenACP UI",
+    name: "harnss",
+    title: "Harnss",
     version: app.getVersion(),
   };
 }
@@ -69,9 +69,95 @@ function pickModelId(
   return typeof first?.id === "string" ? first.id : undefined;
 }
 
+function shortId(value: unknown, length = 8): string {
+  return typeof value === "string" ? value.slice(0, length) : "n/a";
+}
+
+function shouldLogFullToolEvent(
+  method: string,
+  params: Record<string, unknown>,
+): boolean {
+  if (method !== "item/started" && method !== "item/completed") return false;
+  const item = params.item as Record<string, unknown> | undefined;
+  if (!item || typeof item.type !== "string") return false;
+  return (
+    item.type === "commandExecution" ||
+    item.type === "fileChange" ||
+    item.type === "mcpToolCall" ||
+    item.type === "webSearch" ||
+    item.type === "imageView"
+  );
+}
+
+function summarizeCodexNotification(
+  method: string,
+  params: Record<string, unknown>,
+): string {
+  switch (method) {
+    case "turn/started": {
+      const turn = params.turn as Record<string, unknown> | undefined;
+      return `turn/started turn=${shortId(turn?.id, 12)}`;
+    }
+    case "turn/completed": {
+      const turn = params.turn as Record<string, unknown> | undefined;
+      const status = typeof turn?.status === "string" ? turn.status : "unknown";
+      const err = (turn?.error as Record<string, unknown> | undefined)?.message;
+      return `turn/completed turn=${shortId(turn?.id, 12)} status=${status}${typeof err === "string" ? ` error="${err.slice(0, 120)}"` : ""}`;
+    }
+    case "item/started":
+    case "item/completed": {
+      const item = params.item as Record<string, unknown> | undefined;
+      if (!item) return `${method} (missing item)`;
+      const type = typeof item.type === "string" ? item.type : "unknown";
+      const status = typeof item.status === "string" ? ` status=${item.status}` : "";
+      const cmd = typeof item.command === "string"
+        ? ` cmd="${item.command.split("\n")[0].slice(0, 80)}"`
+        : "";
+      const exit = typeof item.exitCode === "number" ? ` exit=${item.exitCode}` : "";
+      return `${method} type=${type} id=${shortId(item.id, 12)}${status}${exit}${cmd}`;
+    }
+    case "item/agentMessage/delta": {
+      const delta = typeof params.delta === "string" ? params.delta : "";
+      return `item/agentMessage/delta id=${shortId(params.itemId, 12)} len=${delta.length}`;
+    }
+    case "item/reasoning/summaryTextDelta":
+    case "item/reasoning/textDelta": {
+      const delta = typeof params.delta === "string" ? params.delta : "";
+      return `${method} id=${shortId(params.itemId, 12)} len=${delta.length}`;
+    }
+    case "item/commandExecution/outputDelta": {
+      const delta = typeof params.delta === "string" ? params.delta : "";
+      return `item/commandExecution/outputDelta id=${shortId(params.itemId, 12)} len=${delta.length}`;
+    }
+    case "turn/plan/updated": {
+      const plan = Array.isArray(params.plan) ? params.plan : [];
+      return `turn/plan/updated steps=${plan.length}`;
+    }
+    case "thread/tokenUsage/updated": {
+      const usage = params.tokenUsage as Record<string, unknown> | undefined;
+      const total = (usage?.total as Record<string, unknown> | undefined)?.totalTokens;
+      const input = (usage?.last as Record<string, unknown> | undefined)?.inputTokens;
+      const output = (usage?.last as Record<string, unknown> | undefined)?.outputTokens;
+      return `thread/tokenUsage/updated total=${typeof total === "number" ? total : "?"} last_in=${typeof input === "number" ? input : "?"} last_out=${typeof output === "number" ? output : "?"}`;
+    }
+    case "error": {
+      const err = params.error as Record<string, unknown> | undefined;
+      const msg = typeof err?.message === "string" ? err.message : "unknown";
+      return `error message="${msg.slice(0, 180)}"`;
+    }
+    default:
+      return method;
+  }
+}
+
 // ── Registration ──
 
 export function register(getMainWindow: () => BrowserWindow | null): void {
+  // Forward renderer-side Codex logs to main process log file.
+  ipcMain.on("codex:log", (_event, label: string, data: unknown) => {
+    log(`CODEX_UI:${label}`, data);
+  });
+
   // ─── codex:start ───
   ipcMain.handle(
     "codex:start",
@@ -82,6 +168,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
         model?: string;
         approvalPolicy?: string;
         personality?: string;
+        collaborationMode?: { mode: string; settings: { model: string; reasoning_effort: string | null; developer_instructions: string | null } };
       },
     ) => {
       const internalId = crypto.randomUUID();
@@ -124,6 +211,17 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
         // Forward notifications to renderer
         rpc.onNotification = (msg) => {
           session.eventCounter++;
+          log(
+            "codex",
+            `[evt:${internalId.slice(0, 8)}] #${session.eventCounter} ${summarizeCodexNotification(msg.method, msg.params)}`,
+          );
+          if (shouldLogFullToolEvent(msg.method, msg.params)) {
+            log("CODEX_EVENT_FULL", {
+              session: internalId.slice(0, 8),
+              method: msg.method,
+              item: msg.params.item,
+            });
+          }
 
           // Track active turn from turn events
           if (msg.method === "turn/started") {
@@ -142,6 +240,10 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
 
         // Bridge server-initiated approval requests to renderer
         rpc.onServerRequest = (msg) => {
+          log(
+            "codex",
+            `[srvreq:${internalId.slice(0, 8)}] ${msg.method} id=${msg.id}`,
+          );
           if (
             msg.method === "item/commandExecution/requestApproval" ||
             msg.method === "item/fileChange/requestApproval"
@@ -223,12 +325,16 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
         }
 
         // ── Start a thread ──
+        // ThreadStartParams: experimentalRawEvents and persistExtendedHistory are required booleans
         const threadParams: Record<string, unknown> = {
           cwd: options.cwd,
+          experimentalRawEvents: false,
+          persistExtendedHistory: false,
         };
         if (selectedModel) threadParams.model = selectedModel;
         if (options.approvalPolicy) threadParams.approvalPolicy = options.approvalPolicy;
         if (options.personality) threadParams.personality = options.personality;
+        // collaborationMode is set per-turn via turn/start, not on thread/start
 
         const threadResult = (await rpc.request("thread/start", threadParams)) as {
           thread: { id: string; [k: string]: unknown };
@@ -267,11 +373,23 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
         text: string;
         images?: Array<{ type: "image"; url: string } | { type: "localImage"; path: string }>;
         effort?: string;
+        collaborationMode?: { mode: string; settings: { model: string; reasoning_effort: string | null; developer_instructions: string | null } };
       },
     ) => {
       const session = codexSessions.get(data.sessionId);
-      if (!session) return { error: "Session not found" };
-      if (!session.threadId) return { error: "No active thread" };
+      if (!session) {
+        log("codex", ` Send rejected: session not found id=${shortId(data.sessionId, 12)}`);
+        return { error: "Session not found" };
+      }
+      if (!session.threadId) {
+        log("codex", ` Send rejected: no active thread session=${shortId(data.sessionId, 12)}`);
+        return { error: "No active thread" };
+      }
+
+      log(
+        "codex",
+        ` Send requested: session=${shortId(data.sessionId, 12)} thread=${shortId(session.threadId, 12)} text_len=${data.text.length} images=${data.images?.length ?? 0} effort=${data.effort ?? "default"} collab=${data.collaborationMode?.mode ?? "none"} activeTurn=${session.activeTurnId ? shortId(session.activeTurnId, 12) : "none"}`,
+      );
 
       try {
         const input: unknown[] = [{ type: "text", text: data.text }];
@@ -279,19 +397,31 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
           input.push(...data.images);
         }
 
+        // TurnStartParams: only threadId and input are required; all other fields are optional.
+        // Only include fields we actually have values for.
         const turnParams: Record<string, unknown> = {
           threadId: session.threadId,
           input,
+          ...(session.model ? { model: session.model } : {}),
+          ...(data.effort ? { effort: data.effort } : {}),
+          ...(data.collaborationMode ? { collaborationMode: data.collaborationMode } : {}),
         };
-        if (session.model) turnParams.model = session.model;
-        if (data.effort) turnParams.effort = data.effort;
+
 
         const result = (await session.rpc.request("turn/start", turnParams)) as {
           turn: { id: string; [k: string]: unknown };
         };
         session.activeTurnId = result.turn.id;
+        log(
+          "codex",
+          ` Send accepted: session=${shortId(data.sessionId, 12)} turn=${shortId(result.turn.id, 12)}`,
+        );
         return { turnId: result.turn.id };
       } catch (err) {
+        log(
+          "codex",
+          ` Send failed: session=${shortId(data.sessionId, 12)} error=${errorMessage(err)}`,
+        );
         return { error: errorMessage(err) };
       }
     },
@@ -456,6 +586,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
         cwd: string;
         threadId: string;
         model?: string;
+        approvalPolicy?: string;
       },
     ) => {
       const internalId = crypto.randomUUID();
@@ -491,6 +622,17 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
         rpc.onStderr = (text) => log("codex", `[stderr:${internalId.slice(0, 8)}] ${text.slice(0, 500)}`);
         rpc.onNotification = (msg) => {
           session.eventCounter++;
+          log(
+            "codex",
+            `[evt:${internalId.slice(0, 8)}] #${session.eventCounter} ${summarizeCodexNotification(msg.method, msg.params)}`,
+          );
+          if (shouldLogFullToolEvent(msg.method, msg.params)) {
+            log("CODEX_EVENT_FULL", {
+              session: internalId.slice(0, 8),
+              method: msg.method,
+              item: msg.params.item,
+            });
+          }
           if (msg.method === "turn/started") {
             const turn = (msg.params as Record<string, unknown>).turn as Record<string, unknown> | undefined;
             if (turn?.id) session.activeTurnId = turn.id as string;
@@ -504,6 +646,10 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
           });
         };
         rpc.onServerRequest = (msg) => {
+          log(
+            "codex",
+            `[srvreq:${internalId.slice(0, 8)}] ${msg.method} id=${msg.id}`,
+          );
           if (
             msg.method === "item/commandExecution/requestApproval" ||
             msg.method === "item/fileChange/requestApproval"
@@ -519,6 +665,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
           }
         };
         rpc.onExit = (code, signal) => {
+          log("codex", ` Process exited: code=${code} signal=${signal} session=${internalId}`);
           codexSessions.delete(internalId);
           safeSend(getMainWindow, "codex:exit", { _sessionId: internalId, code, signal });
         };
@@ -530,10 +677,16 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
         });
         rpc.notify("initialized", {});
 
-        // Resume thread
-        const threadResult = (await rpc.request("thread/resume", {
+        // Resume thread — persistExtendedHistory is required by ThreadResumeParams
+        const threadParams: Record<string, unknown> = {
           threadId: data.threadId,
-        })) as { thread: { id: string; [k: string]: unknown } };
+          persistExtendedHistory: false,
+        };
+        if (data.approvalPolicy) threadParams.approvalPolicy = data.approvalPolicy;
+
+        const threadResult = (await rpc.request("thread/resume", threadParams)) as {
+          thread: { id: string; [k: string]: unknown };
+        };
         session.threadId = threadResult.thread.id;
         log("codex",` Thread resumed: ${session.threadId}`);
 

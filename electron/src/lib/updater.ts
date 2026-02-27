@@ -137,8 +137,8 @@ export function initAutoUpdater(
         log("UPDATER_ERR", `Manual install failed: ${msg}`);
         // Last resort: open the GitHub release page for manual download
         const releaseUrl = lastDownloadedVersion
-          ? `https://github.com/OpenSource03/openacpui/releases/tag/v${lastDownloadedVersion}`
-          : "https://github.com/OpenSource03/openacpui/releases/latest";
+          ? `https://github.com/OpenSource03/harnss/releases/tag/v${lastDownloadedVersion}`
+          : "https://github.com/OpenSource03/harnss/releases/latest";
         shell.openExternal(releaseUrl);
         const win = getMainWindow();
         win?.webContents.send("updater:install-error", {
@@ -207,12 +207,12 @@ export function initAutoUpdater(
  * Falls back to glob-matching if the exact version-based name isn't found.
  */
 function findUpdateZip(): string | null {
-  // electron-updater stores downloads in ~/Library/Caches/open-acp-ui-updater/pending/
+  // electron-updater stores downloads in ~/Library/Caches/harnss-updater/pending/
   // app.getPath("appData") = ~/Library/Application Support, so go up one to ~/Library/
-  const cacheDir = path.join(path.dirname(app.getPath("appData")), "Caches", "open-acp-ui-updater", "pending");
+  const cacheDir = path.join(path.dirname(app.getPath("appData")), "Caches", "harnss-updater", "pending");
   if (!fs.existsSync(cacheDir)) return null;
 
-  // Try exact match first (e.g. OpenACP-UI-0.6.1-arm64-mac.zip)
+  // Try exact match first (e.g. Harnss-0.6.1-arm64-mac.zip)
   if (lastDownloadedVersion) {
     const entries = fs.readdirSync(cacheDir);
     const match = entries.find(
@@ -236,7 +236,7 @@ async function manualMacInstall(): Promise<void> {
   log("UPDATER", `Manual install: using ZIP at ${zipPath}`);
 
   // Resolve the current .app bundle path from the running executable
-  // e.g. /Applications/OpenACP UI.app/Contents/MacOS/OpenACP UI → /Applications/OpenACP UI.app
+  // e.g. /Applications/Harnss.app/Contents/MacOS/Harnss → /Applications/Harnss.app
   const exePath = app.getPath("exe");
   const appBundleMatch = exePath.match(/^(.+?\.app)\//);
   if (!appBundleMatch) throw new Error(`Cannot determine .app bundle from exe path: ${exePath}`);
@@ -250,7 +250,7 @@ async function manualMacInstall(): Promise<void> {
     throw new Error(`No write permission to ${appParentDir} — install the app to a writable location`);
   }
 
-  const tmpDir = path.join(app.getPath("temp"), `openacpui-update-${Date.now()}`);
+  const tmpDir = path.join(app.getPath("temp"), `harnss-update-${Date.now()}`);
   const backupPath = `${appBundlePath}.old`;
 
   try {

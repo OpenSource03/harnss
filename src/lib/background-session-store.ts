@@ -12,7 +12,7 @@ import type {
 } from "../types";
 import type { ACPSessionEvent, ACPPermissionEvent } from "../types/acp";
 import type { CodexSessionEvent } from "../types/codex";
-import { codexItemToToolName, codexItemToToolInput, codexItemToToolResult } from "./codex-adapter";
+import { codexItemToToolName, codexItemToToolInput, codexItemToToolResult, codexPlanToTodos } from "./codex-adapter";
 import type { CodexThreadItem } from "../types/codex";
 import {
   getParentId,
@@ -40,6 +40,10 @@ export interface BackgroundSessionState {
 interface InternalState extends BackgroundSessionState {
   parentToolMap: Map<string, string>;
   currentStreamingMsgId: string | null;
+  /** Accumulated plan text from item/plan/delta events (Codex only). */
+  codexPlanText: string;
+  /** Per-turn counter for unique plan card message IDs (Codex only). */
+  codexPlanTurnCounter: number;
 }
 
 /** Callback fired when a background session receives a permission request */
@@ -87,6 +91,8 @@ export class BackgroundSessionStore {
         rawAcpPermission: null,
         parentToolMap: new Map(),
         currentStreamingMsgId: null,
+        codexPlanText: "",
+        codexPlanTurnCounter: 0,
       };
       this.sessions.set(sessionId, state);
     }
@@ -118,6 +124,7 @@ export class BackgroundSessionStore {
           cwd: init.cwd,
           tools: init.tools,
           version: init.claude_code_version,
+          permissionMode: init.permissionMode,
         };
         state.isConnected = true;
         state.isProcessing = true;
@@ -196,6 +203,8 @@ export class BackgroundSessionStore {
         if (Array.isArray(uc) && uc[0]?.type === "tool_result") {
           const toolResult = uc[0];
           const toolUseId = toolResult.tool_use_id;
+          const toolName = state.messages.find((m) => m.id === `tool-${toolUseId}`)?.toolName;
+          const isError = !!toolResult.is_error;
           const resultMeta = normalizeToolResult(
             evt.tool_use_result,
             toolResult.content,
@@ -215,6 +224,10 @@ export class BackgroundSessionStore {
             }
             return { ...m, toolResult: resultMeta };
           });
+
+          if (!isError && toolName === "EnterPlanMode" && state.sessionInfo) {
+            state.sessionInfo = { ...state.sessionInfo, permissionMode: "plan" };
+          }
         } else if (typeof uc === "string" && evt.uuid) {
           // Replayed user text message — stamp checkpoint UUID on first unmatched user message.
           // Mirrors the logic in useClaude.ts so background sessions also capture checkpoints.
@@ -493,6 +506,8 @@ export class BackgroundSessionStore {
     switch (method) {
       case "turn/started":
         state.isProcessing = true;
+        state.codexPlanText = "";
+        state.codexPlanTurnCounter += 1;
         this.onProcessingChange?.(sessionId, true);
         break;
 
@@ -505,13 +520,15 @@ export class BackgroundSessionStore {
       case "item/started": {
         const item = (params as Record<string, unknown>).item as CodexThreadItem | undefined;
         if (!item) break;
-        if (item.type === "agentMessage") {
-          this.ensureACPStreamingMsg(state); // reuse streaming msg pattern
+        if (item.type === "agentMessage" || item.type === "reasoning") {
+          this.ensureACPStreamingMsg(state);
         } else {
+          // Non-assistant item is a hard boundary — finalize streaming first
+          this.finalizeACPStreamingMsg(state);
           const toolName = codexItemToToolName(item);
           if (toolName) {
-            this.finalizeACPStreamingMsg(state);
-            const msgId = `codex-tool-bg-${item.id}`;
+            // Deterministic ID matches active hook so completions work after switch-back
+            const msgId = `codex-tool-${item.id}`;
             state.parentToolMap.set(item.id, msgId);
             state.messages.push({
               id: msgId,
@@ -534,21 +551,60 @@ export class BackgroundSessionStore {
           const target = state.messages.find(m => m.id === state.currentStreamingMsgId);
           if (target && text) target.content = text;
           this.finalizeACPStreamingMsg(state);
-        } else {
-          const msgId = state.parentToolMap.get(item.id);
-          if (msgId) {
-            const msg = state.messages.find(m => m.id === msgId);
-            if (msg) {
-              const result = codexItemToToolResult(item);
-              if (result) msg.toolResult = result;
-              const isError =
-                (item.type === "commandExecution" && (item.status === "failed" || item.status === "declined")) ||
-                (item.type === "fileChange" && (item.status === "failed" || item.status === "declined")) ||
-                (item.type === "mcpToolCall" && item.status === "failed");
-              if (isError) msg.toolError = true;
-            }
-            state.parentToolMap.delete(item.id);
+        } else if (item.type === "reasoning") {
+          // Mark thinking as complete on the current streaming message
+          if (state.currentStreamingMsgId) {
+            const target = state.messages.find(m => m.id === state.currentStreamingMsgId);
+            if (target?.thinking) target.thinkingComplete = true;
           }
+        } else if (item.type === "plan") {
+          // Finalize plan: mark codex-plan-stream as completed, synthesize ExitPlanMode prompt
+          this.finalizeACPStreamingMsg(state);
+          const finalText = (item as Record<string, unknown>).text as string | undefined;
+          const planContent = finalText ?? state.codexPlanText;
+          if (planContent) {
+            const existing = state.messages.find(m => m.id === "codex-plan-stream");
+            if (existing) {
+              existing.toolInput = { plan: planContent };
+              existing.toolResult = { type: "plan" };
+            } else {
+              state.messages.push({
+                id: this.nextId("plan"),
+                role: "tool_call",
+                content: "",
+                toolName: "ExitPlanMode",
+                toolInput: { plan: planContent },
+                toolResult: { type: "plan" },
+                timestamp: Date.now(),
+              });
+            }
+            // Set plan permission mode on sessionInfo
+            if (state.sessionInfo) {
+              state.sessionInfo = { ...state.sessionInfo, permissionMode: "plan" };
+            }
+            // Synthesize ExitPlanMode permission so it's restored on switch-back
+            state.pendingPermission = {
+              requestId: `codex-plan-${Date.now()}`,
+              toolName: "ExitPlanMode",
+              toolInput: {},
+              toolUseId: "codex-plan",
+            };
+            this.onPermissionRequest?.(sessionId, state.pendingPermission);
+          }
+        } else {
+          // Generic tool completion — deterministic fallback for cross-session mapping
+          const msgId = state.parentToolMap.get(item.id) ?? `codex-tool-${item.id}`;
+          const msg = state.messages.find(m => m.id === msgId);
+          if (msg) {
+            const result = codexItemToToolResult(item);
+            if (result) msg.toolResult = result;
+            const isError =
+              (item.type === "commandExecution" && (item.status === "failed" || item.status === "declined")) ||
+              (item.type === "fileChange" && (item.status === "failed" || item.status === "declined")) ||
+              (item.type === "mcpToolCall" && item.status === "failed");
+            if (isError) msg.toolError = true;
+          }
+          state.parentToolMap.delete(item.id);
         }
         break;
       }
@@ -573,6 +629,84 @@ export class BackgroundSessionStore {
           this.ensureACPStreamingMsg(state);
           const target = state.messages.find(m => m.id === state.currentStreamingMsgId);
           if (target) target.thinking = (target.thinking ?? "") + delta;
+        }
+        break;
+      }
+
+      case "item/commandExecution/outputDelta": {
+        const itemId = (params as Record<string, unknown>).itemId as string | undefined;
+        const delta = (params as Record<string, unknown>).delta as string | undefined;
+        if (!itemId || !delta) break;
+
+        // Deterministic fallback for tools created by the active hook before switch-away
+        const msgId = state.parentToolMap.get(itemId) ?? `codex-tool-${itemId}`;
+        if (!msgId) break;
+
+        const msg = state.messages.find(m => m.id === msgId);
+        if (!msg) break;
+
+        const existingStdout =
+          typeof msg.toolResult?.stdout === "string"
+            ? msg.toolResult.stdout
+            : typeof msg.toolResult?.content === "string"
+              ? msg.toolResult.content
+              : "";
+
+        msg.toolResult = {
+          ...(msg.toolResult ?? {}),
+          type: "text",
+          stdout: existingStdout + delta,
+        };
+        break;
+      }
+
+      case "item/plan/delta": {
+        const p = params as Record<string, unknown>;
+        const delta = typeof p.delta === "string" ? p.delta : "";
+        if (!delta) break;
+        state.codexPlanText += delta;
+        const planText = state.codexPlanText;
+        const existing = state.messages.find(m => m.id === "codex-plan-stream");
+        if (existing) {
+          existing.toolInput = { plan: planText };
+        } else {
+          this.finalizeACPStreamingMsg(state);
+          state.messages.push({
+            id: "codex-plan-stream",
+            role: "tool_call",
+            content: "",
+            toolName: "ExitPlanMode",
+            toolInput: { plan: planText },
+            // No toolResult yet — renders as "Preparing plan" shimmer
+            timestamp: Date.now(),
+          });
+        }
+        break;
+      }
+
+      case "turn/plan/updated": {
+        const p = params as Record<string, unknown>;
+        const plan = p.plan as Array<{ step: string; status: string }> | undefined;
+        if (!plan) break;
+        const todos = codexPlanToTodos(plan);
+        const explanation = p.explanation as string | null | undefined;
+        const planMsgId = `codex-plan-update-${state.codexPlanTurnCounter}`;
+        const toolInput = { todos, ...(explanation ? { explanation } : {}) };
+        const toolResult = { content: `Plan: ${plan.length} step${plan.length !== 1 ? "s" : ""}` };
+        const existingMsg = state.messages.find(m => m.id === planMsgId);
+        if (existingMsg) {
+          existingMsg.toolInput = toolInput;
+          existingMsg.toolResult = toolResult;
+        } else {
+          state.messages.push({
+            id: planMsgId,
+            role: "tool_call",
+            content: "",
+            toolName: "TodoWrite",
+            toolInput,
+            toolResult,
+            timestamp: Date.now(),
+          });
         }
         break;
       }
@@ -636,6 +770,25 @@ export class BackgroundSessionStore {
         const toolUseId = msg.id.replace(/^tool-/, "");
         parentToolMap.set(toolUseId, msg.id);
       }
+      // Reconstruct Codex in-flight tool mappings from deterministic IDs
+      if (msg.role === "tool_call" && msg.id.startsWith("codex-tool-") && !msg.toolResult && !msg.toolError) {
+        const itemId = msg.id.replace("codex-tool-", "");
+        parentToolMap.set(itemId, msg.id);
+      }
+    }
+
+    // Reconstruct Codex plan text from existing plan-stream message
+    const planStreamMsg = messages.find(m => m.id === "codex-plan-stream");
+    const planInput = planStreamMsg?.toolInput as { plan?: string } | undefined;
+    const codexPlanText = planInput?.plan ?? "";
+
+    // Reconstruct plan turn counter from existing plan-update messages
+    let codexPlanTurnCounter = 0;
+    for (const msg of messages) {
+      if (msg.id.startsWith("codex-plan-update-")) {
+        const num = parseInt(msg.id.replace("codex-plan-update-", ""), 10);
+        if (!isNaN(num) && num >= codexPlanTurnCounter) codexPlanTurnCounter = num;
+      }
     }
 
     // Detect a mid-stream message so we can continue accumulating deltas
@@ -653,6 +806,8 @@ export class BackgroundSessionStore {
       rawAcpPermission: state.rawAcpPermission ?? null,
       parentToolMap,
       currentStreamingMsgId: streamingMsg?.id ?? null,
+      codexPlanText,
+      codexPlanTurnCounter,
     });
   }
 
