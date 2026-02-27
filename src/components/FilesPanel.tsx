@@ -301,7 +301,7 @@ export const FilesPanel = memo(function FilesPanel({
 
       {files.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-4">
-          <p className="text-center text-xs text-muted-foreground/60">
+          <p className="text-center text-xs text-muted-foreground/70">
             Files accessed during this session will appear here
           </p>
         </div>
@@ -330,13 +330,13 @@ export const FilesPanel = memo(function FilesPanel({
                             {fileName}
                           </span>
                           {rangeText && (
-                            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
+                            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">
                               {rangeText}
                             </span>
                           )}
                         </div>
                         {dirPath && (
-                          <div className="truncate text-[10px] text-muted-foreground/60">
+                          <div className="truncate text-[10px] text-muted-foreground/70">
                             {dirPath}
                           </div>
                         )}

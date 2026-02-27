@@ -5,6 +5,7 @@ type QueryHandle = AsyncGenerator & {
   interrupt: () => Promise<void>;
   setPermissionMode: (mode: string) => Promise<void>;
   setModel?: (model?: string) => Promise<void>;
+  setMaxThinkingTokens?: (maxThinkingTokens: number | null) => Promise<void>;
   mcpServerStatus?: () => Promise<unknown[]>;
   reconnectMcpServer?: (serverName: string) => Promise<void>;
   supportedModels?: () => Promise<Array<{ value: string; displayName: string; description: string }>>;
@@ -35,6 +36,15 @@ export async function getSDK(): Promise<QueryFn> {
     }
   }
   return _sdkQuery;
+}
+
+/**
+ * Environment variables that identify Harnss to the Claude backend.
+ * The SDK reads CLAUDE_AGENT_SDK_CLIENT_APP and includes it in the User-Agent header,
+ * letting Anthropic distinguish Harnss sessions from CLI / other clients.
+ */
+export function clientAppEnv(): Record<string, string> {
+  return { CLAUDE_AGENT_SDK_CLIENT_APP: `harnss/${app.getVersion()}` };
 }
 
 /**

@@ -76,7 +76,7 @@ export const SpaceBar = memo(function SpaceBar({
         <TooltipTrigger asChild>
           <button
             onClick={onOpenSettings}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/30 transition-colors hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
           >
             <Settings className="h-4 w-4" />
           </button>
@@ -113,7 +113,7 @@ export const SpaceBar = memo(function SpaceBar({
                   className={`relative flex h-8 w-8 items-center justify-center rounded-md transition-all ${
                     isActive
                       ? "text-sidebar-foreground bg-sidebar-accent"
-                      : "text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
+                      : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
                   } ${isDragOver ? "ring-2 ring-primary scale-110" : ""}`}
                 >
                   <SpaceIcon space={space} />
@@ -138,7 +138,7 @@ export const SpaceBar = memo(function SpaceBar({
         <TooltipTrigger asChild>
           <button
             onClick={onCreateSpace}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/30 transition-colors hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
           >
             <Plus className="h-4 w-4" />
           </button>

@@ -2,12 +2,14 @@
  * Codex engine types — re-exports from generated protocol schema plus our own wrappers.
  *
  * Protocol types are auto-generated via `codex app-server generate-ts --out src/types/codex-protocol/`.
- * This file provides convenience aliases and OpenACP-specific wrappers (e.g. _sessionId tags).
+ * This file provides convenience aliases and Harnss-specific wrappers (e.g. _sessionId tags).
  */
+
+import type { ServerNotification as CodexServerNotification } from "./codex-protocol/ServerNotification";
 
 // ── Generated protocol types ──
 
-export type { ServerNotification as CodexServerNotification } from "./codex-protocol/ServerNotification";
+export type { CodexServerNotification };
 export type { ServerRequest as CodexServerRequest } from "./codex-protocol/ServerRequest";
 export type { ClientRequest as CodexClientRequest } from "./codex-protocol/ClientRequest";
 export type { ClientNotification as CodexClientNotification } from "./codex-protocol/ClientNotification";
@@ -72,14 +74,16 @@ export type { CommandExecutionStatus as CodexCommandExecutionStatus } from "./co
 export type { PatchApplyStatus as CodexPatchApplyStatus } from "./codex-protocol/v2/PatchApplyStatus";
 export type { McpToolCallStatus as CodexMcpToolCallStatus } from "./codex-protocol/v2/McpToolCallStatus";
 
-// ── OpenACP-specific wrappers ──
+// ── Harnss-specific wrappers ──
+
+/** Local renderer-only notification emitted before thread start when auth is missing. */
+export interface CodexAuthRequiredNotification {
+  method: "codex:auth_required";
+  params: { requiresOpenaiAuth: boolean };
+}
 
 /** Codex notification forwarded from main process, tagged with our internal session ID. */
-export interface CodexSessionEvent {
-  _sessionId: string;
-  method: string;
-  params: Record<string, unknown>;
-}
+export type CodexSessionEvent = { _sessionId: string } & (CodexServerNotification | CodexAuthRequiredNotification);
 
 /** Codex server-initiated approval request forwarded to the renderer. */
 export interface CodexApprovalRequest {

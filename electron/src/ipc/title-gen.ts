@@ -1,6 +1,6 @@
 import { ipcMain } from "electron";
 import { log } from "../lib/logger";
-import { getSDK, getCliPath } from "../lib/sdk";
+import { getSDK, getCliPath, clientAppEnv } from "../lib/sdk";
 import { gitExec } from "../lib/git-exec";
 
 export function register(): void {
@@ -51,6 +51,7 @@ export function register(): void {
           allowDangerouslySkipPermissions: true,
           persistSession: false,
           pathToClaudeCodeExecutable: getCliPath(),
+          env: { ...process.env, ...clientAppEnv() },
         },
       });
 
@@ -144,6 +145,7 @@ export function register(): void {
           systemPrompt: { type: "preset", preset: "claude_code" },
           settingSources: ["project", "user"],
           pathToClaudeCodeExecutable: getCliPath(),
+          env: { ...process.env, ...clientAppEnv() },
         },
       });
 

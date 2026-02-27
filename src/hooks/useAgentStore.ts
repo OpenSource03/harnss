@@ -3,7 +3,7 @@ import type { RegistryAgent, RegistryData } from "@/types";
 
 const REGISTRY_URL =
   "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
-const CACHE_KEY = "openacpui-agent-store-cache";
+const CACHE_KEY = "harnss-agent-store-cache";
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
 interface CacheEntry {

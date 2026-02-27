@@ -2,6 +2,7 @@ import { execSync } from "child_process";
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, session, systemPreferences } from "electron";
 import path from "path";
 import http from "http";
+import contextMenu from "electron-context-menu";
 
 // Packaged .app bundles launched from Finder get a minimal PATH (/usr/bin:/bin).
 // Inherit the user's shell PATH so child processes (SDK's `node`, git, etc.) resolve.
@@ -18,6 +19,7 @@ if (process.platform !== "win32") {
   }
 }
 import { log } from "./lib/logger";
+import { migrateFromOpenAcpUi } from "./lib/migration";
 import { glassEnabled, liquidGlass } from "./lib/glass";
 import { initAutoUpdater, getIsInstallingUpdate } from "./lib/updater";
 import { sessions } from "./ipc/claude-sessions";
@@ -62,7 +64,7 @@ function createWindow(): void {
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
     width: 1200,
     height: 800,
-    minWidth: 1280,
+    minWidth: 1408,
     minHeight: 600,
     // Packaged builds get the icon from the .app bundle / electron-builder config
     ...(!app.isPackaged && { icon: path.join(__dirname, "../../build/icon.png") }),
@@ -95,6 +97,13 @@ function createWindow(): void {
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+
+  contextMenu({
+    window: mainWindow,
+    showSearchWithGoogle: false,
+    showLookUpSelection: false,
+    showInspectElement: false,
+  });
 
   const isDev = !app.isPackaged;
   if (isDev) {
@@ -191,7 +200,7 @@ function openDevToolsWindow(): void {
         devToolsWindow = new BrowserWindow({
           width: 1000,
           height: 700,
-          title: "OpenACP UI DevTools",
+          title: "Harnss DevTools",
           webPreferences: {
             contextIsolation: true,
             nodeIntegration: false,
@@ -238,6 +247,9 @@ ipcMain.handle("speech:request-mic-permission", async () => {
 });
 
 app.whenReady().then(() => {
+  // Migrate data from old "OpenACP UI" app directory before anything reads it
+  migrateFromOpenAcpUi();
+
   createWindow();
   initAutoUpdater(getMainWindow);
 

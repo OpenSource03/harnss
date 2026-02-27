@@ -153,6 +153,8 @@ export interface ChatSession {
   engine?: EngineId;
   agentSessionId?: string;
   agentId?: string;
+  /** Codex thread ID — needed for `thread/resume` when reviving dead sessions */
+  codexThreadId?: string;
 }
 
 export interface PersistedSession {

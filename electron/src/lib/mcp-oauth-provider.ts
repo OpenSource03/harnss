@@ -33,7 +33,7 @@ export class ElectronOAuthClientProvider implements OAuthClientProvider {
   } {
     return {
       redirect_uris: [this.redirectUrl],
-      client_name: "OpenACP UI",
+      client_name: "Harnss",
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",

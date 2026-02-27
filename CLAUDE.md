@@ -1,4 +1,4 @@
-# OpenACP UI
+# Harnss
 
 Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-ai/claude-agent-sdk` to programmatically manage Claude sessions via `query()`. Supports multiple concurrent sessions with persistent chat history, project workspaces, background agents, tool permissions, and context compaction.
 
@@ -22,87 +22,19 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 
 ```
 electron/
-├── tsconfig.json            # Electron-specific TS config (CJS output)
-├── dist/                    # tsup build output (gitignored)
-│   ├── main.js
-│   └── preload.js
+├── dist/       # tsup build output (gitignored)
 └── src/
-    ├── main.ts              # App entry: createWindow, app lifecycle, devtools, registers all IPC
-    ├── preload.ts            # contextBridge exposing window.claude API + glass detection
-    ├── lib/
-    │   ├── logger.ts         # log(), logStream setup
-    │   ├── async-channel.ts  # AsyncChannel class for multi-turn SDK input
-    │   ├── data-dir.ts       # getDataDir, getProjectSessionsDir, getSessionFilePath
-    │   ├── app-settings.ts   # AppSettings JSON store (main-process settings persisted to data dir)
-    │   ├── glass.ts          # Liquid glass detection + glassEnabled export
-    │   ├── sdk.ts            # Cached getSDK() for @anthropic-ai/claude-agent-sdk
-    │   └── git-exec.ts       # gitExec() helper + ALWAYS_SKIP set
-    └── ipc/
-        ├── claude-sessions.ts # claude:start/send/stop/interrupt/permission_response/set-permission-mode
-        ├── title-gen.ts       # claude:generate-title, git:generate-commit-message
-        ├── projects.ts        # projects:list/create/delete/rename/reorder/update-space
-        ├── sessions.ts        # sessions:save/load/list/delete/search
-        ├── settings.ts        # settings:get/set (main-process AppSettings with change listeners)
-        ├── spaces.ts          # spaces:list/save
-        ├── files.ts           # files:list/read-multiple, file:read/open-in-editor
-        ├── terminal.ts        # terminal:create/write/resize/destroy
-        ├── git.ts             # git:status/stage/unstage/commit/branches/checkout/push/pull/fetch/diff-file/log/discover-repos
-        └── cc-import.ts       # cc-sessions:list/import (Claude Code JSONL transcript conversion)
+    ├── ipc/    # IPC handlers (claude-sessions, projects, sessions, settings, terminal, git, etc.)
+    └── lib/    # Main-process utilities (logger, async-channel, data-dir, app-settings, sdk, etc.)
 
 src/
-├── main.tsx         # React entry point
-├── App.tsx          # Root: glass detection, TooltipProvider + AppLayout
-├── index.css        # Tailwind v4 + ShadCN theme (light/dark, glass morphism, shimmer animation)
-│
-├── types/
-│   ├── protocol.ts  # Claude CLI stream-json wire types (ClaudeEvent, StreamEvent, etc.)
-│   ├── ui.ts        # UIMessage, SessionInfo, Project, ChatSession, PersistedSession,
-│   │                #   PermissionRequest, TodoItem, BackgroundAgent, ImageAttachment, ContextUsage
-│   ├── window.d.ts  # Window.claude type augmentation (sessions, projects, files, ccSessions, permissions)
-│   └── index.ts     # Re-exports (import from "@/types")
-│
-├── lib/
-│   ├── utils.ts                  # ShadCN cn() utility
-│   ├── protocol.ts               # Pure helpers: normalizeToolResult, extractTextContent, buildSdkContent, getParentId
-│   ├── streaming-buffer.ts       # StreamingBuffer class (no React dependency)
-│   ├── background-agent-parser.ts # Parses background agent JSONL output files
-│   └── background-session-store.ts # BackgroundSessionStore: event accumulator for non-active sessions
-│
-├── hooks/
-│   ├── useClaude.ts              # Event handling, streaming, subagent routing, permissions (per-session)
-│   ├── useSessionManager.ts      # Multi-session orchestrator: create, switch, persist, background store
-│   ├── useSidebar.ts             # Sidebar open/close state (localStorage)
-│   ├── useBackgroundAgents.ts    # Polls async Task agent output files for activity updates
-│   └── useProjectManager.ts      # Project CRUD (create via folder picker, rename, delete)
-│
-└── components/
-    ├── ui/                       # ShadCN base components (auto-generated)
-    ├── AppLayout.tsx             # Root layout: sidebar + chat + right panels (todos/agents, tools, tool picker)
-    ├── AppSidebar.tsx            # Collapsible sidebar with projects, sessions grouped by date, CC import
-    ├── ChatHeader.tsx            # Model badge, permission mode, cost, session ID, sidebar toggle
-    ├── ChatView.tsx              # Message list with ScrollArea auto-scroll, continuation detection
-    ├── MessageBubble.tsx         # Markdown rendering, syntax highlighting, images, @file mentions
-    ├── ThinkingBlock.tsx         # Collapsible thinking content with streaming indicator
-    ├── ToolCall.tsx              # Tool cards with icons, DiffViewer for edits, TaskTool for subagents, MCP routing
-    ├── McpToolContent.tsx        # Extensible MCP tool renderer registry (Jira, Confluence, Rovo, etc.)
-    ├── InputBar.tsx              # Textarea, @file mentions, image paste/drag, model/permission dropdowns, context gauge
-    ├── WelcomeScreen.tsx         # Empty state: "Open a project" or "Select a thread"
-    ├── CopyButton.tsx            # Clipboard copy with animated check feedback
-    ├── DiffViewer.tsx            # Unified diff with word-level highlights, context collapsing, line numbers
-    ├── PermissionPrompt.tsx      # Tool permission UI, ExitPlanMode prompt, AskUserQuestion prompt
-    ├── SummaryBlock.tsx          # Context compaction summary with token counts
-    ├── TodoPanel.tsx             # Right-side task list with progress bar and status icons
-    ├── BackgroundAgentsPanel.tsx # Background agent cards with activity logs and status
-    ├── ToolPicker.tsx            # Vertical tool bar: toggles tool panels on/off (terminal, browser, files)
-    ├── ToolsPanel.tsx            # Terminal panel: multi-tab xterm.js instances backed by node-pty
-    ├── BrowserPanel.tsx          # Browser panel: multi-tab Electron webview with URL bar + navigation
-    ├── SettingsView.tsx          # Settings panel with nav sidebar, loads AppSettings from main process
-    ├── settings/
-    │   ├── GeneralSettings.tsx   # General section: pre-release updates toggle, etc.
-    │   ├── AgentSettings.tsx     # ACP agent CRUD (create, edit, delete, paste-JSON import)
-    │   └── PlaceholderSection.tsx # Empty placeholder for unimplemented sections
-    ├── FilesPanel.tsx            # Open Files panel: derives accessed files from session messages
-    └── OpenInEditorButton.tsx    # Subtle hover button to open file in external editor (cursor/code/zed)
+├── components/
+│   ├── settings/  # Settings sub-views (GeneralSettings, AgentSettings, etc.)
+│   └── ui/        # ShadCN base components (auto-generated)
+├── hooks/         # React hooks (useClaude, useSessionManager, useBackgroundAgents, etc.)
+├── lib/           # Renderer utilities (protocol helpers, streaming-buffer, background stores, etc.)
+└── types/         # TypeScript types (protocol, ui, window.d.ts)
+    └── codex-protocol/  # Codex protocol type definitions
 ```
 
 ## How to Run
@@ -147,7 +79,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 
 **IPC API — Session Persistence:**
 
-- `sessions:save(data)` — writes to `{userData}/openacpui-data/sessions/{projectId}/{id}.json`
+- `sessions:save(data)` — writes to `{userData}/openacpui-data/sessions/{projectId}/{id}.json` (`openacpui-data` kept for backward compatibility)
 - `sessions:load(projectId, id)` — reads session file
 - `sessions:list(projectId)` — returns session metadata sorted by date
 - `sessions:delete(projectId, id)` — removes session file
@@ -181,9 +113,9 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 
 Two tiers of settings storage, each suited to different access patterns:
 
-1. **`useSettings` hook** (renderer, localStorage) — UI preferences that only the renderer needs: model, permissionMode, panel widths, active tools, thinking toggle. Per-project settings keyed by `openacpui-{projectId}-*`, global settings keyed by `openacpui-*`.
+1. **`useSettings` hook** (renderer, localStorage) — UI preferences that only the renderer needs: model, permissionMode, panel widths, active tools, thinking toggle. Per-project settings keyed by `harnss-{projectId}-*`, global settings keyed by `harnss-*`.
 
-2. **`AppSettings` store** (main process, JSON file) — settings that the main process needs at startup before any BrowserWindow exists (e.g. `autoUpdater.allowPrerelease`). File location: `{userData}/openacpui-data/settings.json`. Accessed via `getAppSettings()`/`setAppSettings()` in `electron/src/lib/app-settings.ts`. The `settings` IPC module exposes `settings:get`/`settings:set` to the renderer and fires `onSettingsChanged` listeners for in-process consumers (e.g. the updater).
+2. **`AppSettings` store** (main process, JSON file) — settings that the main process needs at startup before any BrowserWindow exists (e.g. `autoUpdater.allowPrerelease`). File location: `{userData}/openacpui-data/settings.json` (`openacpui-data` kept for backward compatibility). Accessed via `getAppSettings()`/`setAppSettings()` in `electron/src/lib/app-settings.ts`. The `settings` IPC module exposes `settings:get`/`settings:set` to the renderer and fires `onSettingsChanged` listeners for in-process consumers (e.g. the updater).
 
 **When to use which:** Use `useSettings` for renderer-only preferences. Use `AppSettings` when the main process must read the value synchronously at startup or react to changes (e.g. updater config, window behavior).
 
@@ -287,7 +219,7 @@ Always search the web when needed for up-to-date API references, Electron APIs, 
 - Start with `## What's New` (for feature releases) or `## Changes` (for smaller releases)
 - Group changes under `### Emoji Section Title` headers (e.g., `### 🌳 Git Worktree Management`)
 - Each bullet: **bold the feature name**, then describe what it does
-- End with `---` separator and `**Full Changelog**: https://github.com/OpenSource03/openacpui/compare/v{prev}...v{current}`
+- End with `---` separator and `**Full Changelog**: https://github.com/OpenSource03/harnss/compare/v{prev}...v{current}`
 - Use `gh release create` with tag, then `gh release edit` to set title + notes
 
 **Commit message format** (conventional commits):

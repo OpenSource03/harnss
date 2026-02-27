@@ -1,16 +1,16 @@
 {
-  "name": "open-acp-ui",
+  "name": "harnss",
   "version": "0.9.1",
-  "productName": "OpenACP UI",
-  "description": "Open-source desktop client for the Agent Client Protocol",
+  "productName": "Harnss",
+  "description": "Harness your AI coding agents — one desktop app for Claude Code, Codex, and any ACP agent",
   "author": {
     "name": "Dejan Zegarac",
     "email": "dejanzegarac3@gmail.com"
   },
-  "homepage": "https://github.com/OpenSource03/openacpui",
+  "homepage": "https://github.com/OpenSource03/harnss",
   "repository": {
     "type": "git",
-    "url": "https://github.com/OpenSource03/openacpui.git"
+    "url": "https://github.com/OpenSource03/harnss.git"
   },
   "main": "electron/dist/main.js",
   "scripts": {
@@ -31,6 +31,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.50",
     "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "electron-context-menu": "^4.1.1",
     "electron-liquid-glass": "^1.1.1",
     "electron-updater": "^6.8.3",
     "motion": "^12.34.3",

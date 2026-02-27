@@ -9,7 +9,6 @@ const PERMISSION_MODE_LABELS: Record<string, string> = {
   plan: "Plan",
   default: "Ask Before Edits",
   acceptEdits: "Accept Edits",
-  dontAsk: "Don't Ask",
   bypassPermissions: "Allow All",
 };
 
@@ -26,6 +25,7 @@ interface ChatHeaderProps {
   sessionId?: string;
   totalCost: number;
   title?: string;
+  planMode?: boolean;
   permissionMode?: string;
   acpPermissionBehavior?: AcpPermissionBehavior;
   onToggleSidebar: () => void;
@@ -38,6 +38,7 @@ export const ChatHeader = memo(function ChatHeader({
   sessionId,
   totalCost,
   title,
+  planMode,
   permissionMode,
   acpPermissionBehavior,
   onToggleSidebar,
@@ -51,6 +52,7 @@ export const ChatHeader = memo(function ChatHeader({
   // Collect all session detail rows for the unified tooltip
   const detailRows: { label: string; value: string }[] = [];
   if (model) detailRows.push({ label: "Model", value: model });
+  detailRows.push({ label: "Plan", value: planMode ? "On" : "Off" });
   if (permissionDisplay) detailRows.push({ label: "Permissions", value: permissionDisplay });
   if (totalCost > 0) detailRows.push({ label: "Cost", value: `$${totalCost.toFixed(4)}` });
   if (sessionId) detailRows.push({ label: "Session", value: sessionId });

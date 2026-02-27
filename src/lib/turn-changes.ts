@@ -1,4 +1,5 @@
 import type { UIMessage } from "@/types";
+import { parseUnifiedDiffFromUnknown } from "@/lib/unified-diff";
 
 // ── Types ──
 
@@ -7,6 +8,7 @@ export interface FileChange {
   fileName: string;
   changeType: "modified" | "created";
   toolName: string;
+  unifiedDiff?: string;
   oldString?: string;
   newString?: string;
   /** Full content for Write tool (new file creation). */
@@ -34,6 +36,33 @@ function basename(filePath: string): string {
   return parts[parts.length - 1] || filePath;
 }
 
+function getStructuredPatchEntry(
+  result: UIMessage["toolResult"],
+  filePath: string,
+): Record<string, unknown> | null {
+  const patches = Array.isArray(result?.structuredPatch)
+    ? (result.structuredPatch as Array<Record<string, unknown>>)
+    : [];
+  if (patches.length === 0) return null;
+
+  if (filePath) {
+    const byPath = patches.find((entry) => {
+      const path = entry.filePath ?? entry.path;
+      return typeof path === "string" && path === filePath;
+    });
+    if (byPath) return byPath;
+  }
+
+  return patches[0] ?? null;
+}
+
+function firstDefinedString(...values: Array<unknown>): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string") return value;
+  }
+  return undefined;
+}
+
 /** Extract a file change from a tool_call message, if it's a file-modifying tool. */
 function extractChange(msg: UIMessage): FileChange | null {
   const { toolName, toolInput } = msg;
@@ -42,14 +71,33 @@ function extractChange(msg: UIMessage): FileChange | null {
   switch (toolName) {
     case "Edit": {
       const filePath = String(toolInput.file_path ?? "");
+      const structuredPatch = getStructuredPatchEntry(msg.toolResult, filePath);
+      const parsedStructuredDiff = parseUnifiedDiffFromUnknown(structuredPatch?.diff);
+      const parsedDiff = parseUnifiedDiffFromUnknown(msg.toolResult?.content);
       if (!filePath) return null;
       return {
         filePath,
         fileName: basename(filePath),
         changeType: "modified",
         toolName,
-        oldString: String(toolInput.old_string ?? ""),
-        newString: String(toolInput.new_string ?? ""),
+        unifiedDiff: firstDefinedString(
+          typeof structuredPatch?.diff === "string" ? structuredPatch.diff : undefined,
+          typeof msg.toolResult?.content === "string" ? msg.toolResult.content : undefined,
+        ),
+        oldString: firstDefinedString(
+          typeof structuredPatch?.oldString === "string" ? structuredPatch.oldString : undefined,
+          parsedStructuredDiff?.oldString,
+          parsedDiff?.oldString,
+          msg.toolResult?.oldString,
+          toolInput.old_string,
+        ) ?? "",
+        newString: firstDefinedString(
+          typeof structuredPatch?.newString === "string" ? structuredPatch.newString : undefined,
+          parsedStructuredDiff?.newString,
+          parsedDiff?.newString,
+          msg.toolResult?.newString,
+          toolInput.new_string,
+        ) ?? "",
         messageId: msg.id,
         timestamp: msg.timestamp,
       };
@@ -105,9 +153,43 @@ function extractSubagentChanges(msg: UIMessage): FileChange[] {
       case "Edit":
         filePath = String(input.file_path ?? "");
         changeType = "modified";
-        oldString = String(input.old_string ?? "");
-        newString = String(input.new_string ?? "");
-        break;
+        {
+          const structuredPatch = getStructuredPatchEntry(step.toolResult, filePath);
+          const parsedStructuredDiff = parseUnifiedDiffFromUnknown(structuredPatch?.diff);
+          const parsedDiff = parseUnifiedDiffFromUnknown(step.toolResult?.content);
+          const unifiedDiff = firstDefinedString(
+            typeof structuredPatch?.diff === "string" ? structuredPatch.diff : undefined,
+            typeof step.toolResult?.content === "string" ? step.toolResult.content : undefined,
+          );
+          oldString = firstDefinedString(
+            typeof structuredPatch?.oldString === "string" ? structuredPatch.oldString : undefined,
+            parsedStructuredDiff?.oldString,
+            parsedDiff?.oldString,
+            step.toolResult?.oldString,
+            input.old_string,
+          ) ?? "";
+          newString = firstDefinedString(
+            typeof structuredPatch?.newString === "string" ? structuredPatch.newString : undefined,
+            parsedStructuredDiff?.newString,
+            parsedDiff?.newString,
+            step.toolResult?.newString,
+            input.new_string,
+          ) ?? "";
+          if (!filePath) continue;
+          results.push({
+            filePath,
+            fileName: basename(filePath),
+            changeType,
+            toolName,
+            unifiedDiff,
+            oldString,
+            newString,
+            content,
+            messageId: msg.id,
+            timestamp: msg.timestamp,
+          });
+        }
+        continue;
       case "Write":
         filePath = String(input.file_path ?? "");
         changeType = "created";

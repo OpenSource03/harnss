@@ -135,7 +135,7 @@ export const SettingsView = memo(function SettingsView({
       case "about":
         return (
           <PlaceholderSection
-            title="About OpenACP UI"
+            title="About Harnss"
             description="Version information and project details will appear here."
             icon={Info}
           />

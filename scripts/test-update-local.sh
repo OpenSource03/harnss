@@ -18,9 +18,9 @@ ORIGINAL_VERSION=$(node -p "require('./package.json').version")
 
 # --open flag: skip rebuild, just launch the existing test app
 if [[ "$1" == "--open" ]]; then
-  APP_PATH="release/$TEST_VERSION/mac-arm64/OpenACP UI.app"
+  APP_PATH="release/$TEST_VERSION/mac-arm64/Harnss.app"
   if [[ ! -d "$APP_PATH" ]]; then
-    APP_PATH="release/$TEST_VERSION/mac/OpenACP UI.app"
+    APP_PATH="release/$TEST_VERSION/mac/Harnss.app"
   fi
   if [[ ! -d "$APP_PATH" ]]; then
     echo "No test app found at release/$TEST_VERSION/. Run without --open first."
@@ -62,9 +62,9 @@ node -e "
 echo "  package.json version restored to $ORIGINAL_VERSION"
 
 # 4. Find the built app
-APP_PATH="release/$TEST_VERSION/mac-arm64/OpenACP UI.app"
+APP_PATH="release/$TEST_VERSION/mac-arm64/Harnss.app"
 if [[ ! -d "$APP_PATH" ]]; then
-  APP_PATH="release/$TEST_VERSION/mac/OpenACP UI.app"
+  APP_PATH="release/$TEST_VERSION/mac/Harnss.app"
 fi
 
 echo ""
@@ -80,7 +80,7 @@ echo "   1. Wait ~5s for update banner"
 echo "   2. Click 'Update' to download"
 echo "   3. Click 'Restart' to test quitAndInstall"
 echo ""
-echo " Logs: ~/Library/Logs/OpenACP UI/"
+echo " Logs: ~/Library/Logs/Harnss/"
 echo "=========================================="
 echo ""
 

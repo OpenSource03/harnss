@@ -13,6 +13,7 @@ import { TextShimmer } from "@/components/ui/text-shimmer";
 interface ChatViewProps {
   messages: UIMessage[];
   isProcessing: boolean;
+  showThinking: boolean;
   extraBottomPadding?: boolean;
   scrollToMessageId?: string;
   onScrolledToMessage?: () => void;
@@ -24,9 +25,11 @@ interface ChatViewProps {
   onFullRevert?: (checkpointId: string) => void;
   /** Called when user clicks "View changes" on an inline turn summary */
   onViewTurnChanges?: (turnIndex: number) => void;
+  /** Called when user clicks "Implement this plan" on a ProposedPlanCard */
+  onImplementPlan?: (planContent: string) => void;
 }
 
-export const ChatView = memo(function ChatView({ messages, isProcessing, extraBottomPadding, scrollToMessageId, onScrolledToMessage, sessionId, onRevert, onFullRevert, onViewTurnChanges }: ChatViewProps) {
+export const ChatView = memo(function ChatView({ messages, isProcessing, showThinking, extraBottomPadding, scrollToMessageId, onScrolledToMessage, sessionId, onRevert, onFullRevert, onViewTurnChanges, onImplementPlan }: ChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const scrollTimerRef = useRef(0);
@@ -245,9 +248,11 @@ export const ChatView = memo(function ChatView({ messages, isProcessing, extraBo
               <div data-message-id={msg.id} className="message-item">
                 <MessageBubble
                   message={msg}
+                  showThinking={showThinking}
                   isContinuation={continuationIds.has(msg.id)}
                   onRevert={onRevert}
                   onFullRevert={onFullRevert}
+                  onImplementPlan={msg.role === "assistant" ? onImplementPlan : undefined}
                 />
               </div>
               {turnSummary && (

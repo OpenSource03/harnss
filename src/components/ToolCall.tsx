@@ -32,9 +32,11 @@ import remarkGfm from "remark-gfm";
 import type { UIMessage, SubagentToolStep, TodoItem } from "@/types";
 import { getLanguageFromPath, INLINE_HIGHLIGHT_STYLE, INLINE_CODE_TAG_STYLE } from "@/lib/languages";
 import { DiffViewer } from "./DiffViewer";
+import { UnifiedPatchViewer } from "./UnifiedPatchViewer";
 import { OpenInEditorButton } from "./OpenInEditorButton";
 import { McpToolContent, hasMcpRenderer, getMcpCompactSummary } from "./McpToolContent";
 import { TextShimmer } from "@/components/ui/text-shimmer";
+import { parseUnifiedDiff, parseUnifiedDiffFromUnknown } from "@/lib/unified-diff";
 
 // ── Stable style constants (avoid re-creating on every render) ──
 
@@ -77,76 +79,87 @@ function getToolIcon(toolName: string) {
   return TOOL_ICONS[toolName] ?? Wrench;
 }
 
-const TOOL_PAST: Record<string, string> = {
-  Bash: "Ran",
-  Read: "Read",
-  Write: "Wrote",
-  Edit: "Edited",
-  Grep: "Searched",
-  Glob: "Found",
-  WebSearch: "Searched web",
-  WebFetch: "Fetched",
-  TodoWrite: "Updated tasks",
-  EnterPlanMode: "Entered plan mode",
-  ExitPlanMode: "Presented plan",
-  AskUserQuestion: "Asked",
-};
+function firstDefinedString(...values: Array<unknown>): string {
+  for (const value of values) {
+    if (typeof value === "string") return value;
+  }
+  return "";
+}
 
-const TOOL_ACTIVE: Record<string, string> = {
-  Bash: "Running",
-  Read: "Reading",
-  Write: "Writing",
-  Edit: "Editing",
-  Grep: "Searching",
-  Glob: "Finding",
-  WebSearch: "Searching web",
-  WebFetch: "Fetching",
-  TodoWrite: "Updating tasks",
-  EnterPlanMode: "Entering plan mode",
-  ExitPlanMode: "Preparing plan",
-  AskUserQuestion: "Asking",
+type ToolLabelType = "past" | "active" | "failure";
+type ToolLabels = Record<ToolLabelType, string>;
+
+const TOOL_LABELS: Record<string, ToolLabels> = {
+  Bash: { past: "Ran", active: "Running", failure: "run" },
+  Read: { past: "Read", active: "Reading", failure: "read" },
+  Write: { past: "Wrote", active: "Writing", failure: "write" },
+  Edit: { past: "Edited", active: "Editing", failure: "edit" },
+  Grep: { past: "Searched", active: "Searching", failure: "search" },
+  Glob: { past: "Found", active: "Finding", failure: "find" },
+  WebSearch: { past: "Searched web", active: "Searching web", failure: "search web" },
+  WebFetch: { past: "Fetched", active: "Fetching", failure: "fetch" },
+  TodoWrite: { past: "Updated tasks", active: "Updating tasks", failure: "update tasks" },
+  EnterPlanMode: { past: "Entered plan mode", active: "Entering plan mode", failure: "enter plan mode" },
+  ExitPlanMode: { past: "Presented plan", active: "Preparing plan", failure: "prepare plan" },
+  AskUserQuestion: { past: "Asked", active: "Asking", failure: "ask" },
 };
 
 // MCP tool friendly names — pattern-matched for different server name prefixes
-const MCP_TOOL_LABELS: Array<{ pattern: RegExp; past: string; active: string }> = [
-  { pattern: /searchJiraIssuesUsingJql$/, past: "Searched Jira", active: "Searching Jira" },
-  { pattern: /getJiraIssue$/, past: "Fetched issue", active: "Fetching issue" },
-  { pattern: /getVisibleJiraProjects$/, past: "Listed projects", active: "Listing projects" },
-  { pattern: /createJiraIssue$/, past: "Created issue", active: "Creating issue" },
-  { pattern: /editJiraIssue$/, past: "Updated issue", active: "Updating issue" },
-  { pattern: /transitionJiraIssue$/, past: "Transitioned issue", active: "Transitioning issue" },
-  { pattern: /addCommentToJiraIssue$/, past: "Added comment", active: "Adding comment" },
-  { pattern: /getTransitionsForJiraIssue$/, past: "Got transitions", active: "Getting transitions" },
-  { pattern: /lookupJiraAccountId$/, past: "Looked up user", active: "Looking up user" },
-  { pattern: /getConfluencePage$/, past: "Fetched page", active: "Fetching page" },
-  { pattern: /searchConfluenceUsingCql$/, past: "Searched Confluence", active: "Searching Confluence" },
-  { pattern: /getConfluenceSpaces$/, past: "Listed spaces", active: "Listing spaces" },
-  { pattern: /createConfluencePage$/, past: "Created page", active: "Creating page" },
-  { pattern: /updateConfluencePage$/, past: "Updated page", active: "Updating page" },
-  { pattern: /getAccessibleAtlassianResources$/, past: "Got resources", active: "Getting resources" },
-  { pattern: /atlassianUserInfo$/, past: "Got user info", active: "Getting user info" },
-  { pattern: /Atlassian[/_]+search$/, past: "Searched Atlassian", active: "Searching Atlassian" },
-  { pattern: /Atlassian[/_]+fetch$/, past: "Fetched resource", active: "Fetching resource" },
+const MCP_TOOL_LABELS: Array<{ pattern: RegExp; labels: ToolLabels }> = [
+  { pattern: /searchJiraIssuesUsingJql$/, labels: { past: "Searched Jira", active: "Searching Jira", failure: "search Jira" } },
+  { pattern: /getJiraIssue$/, labels: { past: "Fetched issue", active: "Fetching issue", failure: "fetch issue" } },
+  { pattern: /getVisibleJiraProjects$/, labels: { past: "Listed projects", active: "Listing projects", failure: "list projects" } },
+  { pattern: /createJiraIssue$/, labels: { past: "Created issue", active: "Creating issue", failure: "create issue" } },
+  { pattern: /editJiraIssue$/, labels: { past: "Updated issue", active: "Updating issue", failure: "update issue" } },
+  { pattern: /transitionJiraIssue$/, labels: { past: "Transitioned issue", active: "Transitioning issue", failure: "transition issue" } },
+  { pattern: /addCommentToJiraIssue$/, labels: { past: "Added comment", active: "Adding comment", failure: "add comment" } },
+  { pattern: /getTransitionsForJiraIssue$/, labels: { past: "Got transitions", active: "Getting transitions", failure: "get transitions" } },
+  { pattern: /lookupJiraAccountId$/, labels: { past: "Looked up user", active: "Looking up user", failure: "look up user" } },
+  { pattern: /getConfluencePage$/, labels: { past: "Fetched page", active: "Fetching page", failure: "fetch page" } },
+  { pattern: /searchConfluenceUsingCql$/, labels: { past: "Searched Confluence", active: "Searching Confluence", failure: "search Confluence" } },
+  { pattern: /getConfluenceSpaces$/, labels: { past: "Listed spaces", active: "Listing spaces", failure: "list spaces" } },
+  { pattern: /createConfluencePage$/, labels: { past: "Created page", active: "Creating page", failure: "create page" } },
+  { pattern: /updateConfluencePage$/, labels: { past: "Updated page", active: "Updating page", failure: "update page" } },
+  { pattern: /getAccessibleAtlassianResources$/, labels: { past: "Got resources", active: "Getting resources", failure: "get resources" } },
+  { pattern: /atlassianUserInfo$/, labels: { past: "Got user info", active: "Getting user info", failure: "get user info" } },
+  { pattern: /Atlassian[/_]+search$/, labels: { past: "Searched Atlassian", active: "Searching Atlassian", failure: "search Atlassian" } },
+  { pattern: /Atlassian[/_]+fetch$/, labels: { past: "Fetched resource", active: "Fetching resource", failure: "fetch resource" } },
   // Context7
-  { pattern: /resolve-library-id$/, past: "Resolved library", active: "Resolving library" },
-  { pattern: /query-docs$/, past: "Queried docs", active: "Querying docs" },
+  { pattern: /resolve-library-id$/, labels: { past: "Resolved library", active: "Resolving library", failure: "resolve library" } },
+  { pattern: /query-docs$/, labels: { past: "Queried docs", active: "Querying docs", failure: "query docs" } },
 ];
 
-function getMcpToolLabel(toolName: string, type: "past" | "active"): string | null {
-  for (const { pattern, past, active } of MCP_TOOL_LABELS) {
-    if (pattern.test(toolName)) return type === "past" ? past : active;
+function getMcpToolLabel(toolName: string, type: ToolLabelType): string | null {
+  for (const { pattern, labels } of MCP_TOOL_LABELS) {
+    if (pattern.test(toolName)) return labels[type];
   }
   // Generic fallback for any MCP tool (mcp__Server__tool) or ACP tool (Tool: Server/tool)
   if (toolName.startsWith("mcp__")) {
     const parts = toolName.split("__");
     const server = parts[1] ?? "MCP";
-    return type === "past" ? `Called ${server}` : `Calling ${server}`;
+    if (type === "past") return `Called ${server}`;
+    if (type === "active") return `Calling ${server}`;
+    return `call ${server}`;
   }
   if (toolName.startsWith("Tool: ")) {
     const server = toolName.slice(6).split("/")[0] ?? "MCP";
-    return type === "past" ? `Called ${server}` : `Calling ${server}`;
+    if (type === "past") return `Called ${server}`;
+    if (type === "active") return `Calling ${server}`;
+    return `call ${server}`;
   }
   return null;
+}
+
+function getToolLabel(toolName: string, type: ToolLabelType): string | null {
+  if (!toolName) return type === "failure" ? "run tool" : null;
+
+  const native = TOOL_LABELS[toolName];
+  if (native) return native[type];
+
+  const mcp = getMcpToolLabel(toolName, type);
+  if (mcp) return mcp;
+
+  return type === "failure" ? `run ${toolName.toLowerCase()}` : null;
 }
 
 // ── Main entry ──
@@ -166,6 +179,7 @@ export const ToolCall = memo(function ToolCall({ message }: { message: UIMessage
     </div>
   );
 }, (prev, next) =>
+  prev.message.toolInput === next.message.toolInput &&
   prev.message.toolResult === next.message.toolResult &&
   prev.message.toolError === next.message.toolError &&
   prev.message.subagentSteps === next.message.subagentSteps &&
@@ -195,13 +209,13 @@ function RegularTool({ message }: { message: UIMessage }) {
           )}
           {isRunning ? (
             <TextShimmer as="span" className="shrink-0 whitespace-nowrap font-medium" duration={1.8} spread={1.5}>
-              {TOOL_ACTIVE[message.toolName ?? ""] ?? getMcpToolLabel(message.toolName ?? "", "active") ?? message.toolName ?? "Running"}
+              {getToolLabel(message.toolName ?? "", "active") ?? message.toolName ?? "Running"}
             </TextShimmer>
           ) : (
             <span className={`shrink-0 whitespace-nowrap font-medium ${isError ? "text-red-400/70" : "text-foreground/75"}`}>
               {isError
-                ? `Failed to ${(TOOL_ACTIVE[message.toolName ?? ""] ?? getMcpToolLabel(message.toolName ?? "", "active") ?? message.toolName).toLowerCase()}`
-                : (TOOL_PAST[message.toolName ?? ""] ?? getMcpToolLabel(message.toolName ?? "", "past") ?? message.toolName)}
+                ? `Failed to ${getToolLabel(message.toolName ?? "", "failure")}`
+                : (getToolLabel(message.toolName ?? "", "past") ?? message.toolName)}
             </span>
           )}
           <span className="truncate text-foreground/40">{summary}</span>
@@ -294,11 +308,35 @@ function BashContent({ message }: { message: UIMessage }) {
   );
 }
 
-// ── Write: syntax-highlighted file content ──
+// ── Write: syntax-highlighted file content (or unified diff for Codex "wrote") ──
 
 function WriteContent({ message }: { message: UIMessage }) {
-  const filePath = String(message.toolInput?.file_path ?? "");
-  const content = String(message.toolInput?.content ?? "");
+  const filePath = String(
+    message.toolInput?.file_path
+      ?? message.toolResult?.filePath
+      ?? "",
+  );
+  // Codex "wrote" may have a structuredPatch with a unified diff
+  const structuredPatch = Array.isArray(message.toolResult?.structuredPatch)
+    ? (message.toolResult.structuredPatch as Array<Record<string, unknown>>)
+    : [];
+  const patchDiff = structuredPatch.length > 0
+    && typeof structuredPatch[0].diff === "string"
+    ? structuredPatch[0].diff
+    : null;
+  // Use UnifiedPatchViewer when the patch is a proper unified diff
+  const hasUnifiedDiff = patchDiff ? parseUnifiedDiff(patchDiff) !== null : false;
+
+  if (hasUnifiedDiff && patchDiff) {
+    return <UnifiedPatchViewer diffText={patchDiff} filePath={filePath} />;
+  }
+
+  // Fall back to syntax-highlighted content — check toolInput first, then toolResult
+  const content = String(
+    message.toolInput?.content
+      ?? (typeof message.toolResult?.content === "string" ? message.toolResult.content : "")
+      ?? "",
+  );
   const language = getLanguageFromPath(filePath);
 
   if (!content) return <GenericContent message={message} />;
@@ -329,17 +367,68 @@ function WriteContent({ message }: { message: UIMessage }) {
 // ── Edit: proper diff viewer ──
 
 function EditContent({ message }: { message: UIMessage }) {
+  const structuredPatch = Array.isArray(message.toolResult?.structuredPatch)
+    ? (message.toolResult.structuredPatch as Array<Record<string, unknown>>)
+    : [];
+  const matchingPatch =
+    structuredPatch.find((entry) => {
+      const entryPath = entry.filePath ?? entry.path;
+      return typeof entryPath === "string"
+        && entryPath
+        && entryPath === String(message.toolInput?.file_path ?? message.toolResult?.filePath ?? "");
+    }) ?? structuredPatch[0];
   const filePath = String(
-    message.toolInput?.file_path ?? message.toolResult?.filePath ?? "",
+    message.toolInput?.file_path
+      ?? message.toolResult?.filePath
+      ?? (typeof matchingPatch?.filePath === "string" ? matchingPatch.filePath : "")
+      ?? "",
   );
-  // ACP edits: old_string/new_string may be in toolResult (extracted from content[] diffs
-  // by normalizeToolResult) rather than in toolInput
-  const oldStr = String(message.toolInput?.old_string ?? message.toolResult?.oldString ?? "");
-  const newStr = String(message.toolInput?.new_string ?? message.toolResult?.newString ?? "");
+  const parsedStructuredDiff = parseUnifiedDiffFromUnknown(matchingPatch?.diff);
+  const parsedDiff = parseUnifiedDiffFromUnknown(message.toolResult?.content);
+  const unifiedDiffText = firstDefinedString(
+    typeof matchingPatch?.diff === "string" ? matchingPatch.diff : undefined,
+    typeof message.toolResult?.content === "string" ? message.toolResult.content : undefined,
+  );
+  // Prefer parsed/structured patch text first; toolInput can be a lossy representation.
+  const oldStr = firstDefinedString(
+    typeof matchingPatch?.oldString === "string" ? matchingPatch.oldString : undefined,
+    parsedStructuredDiff?.oldString,
+    parsedDiff?.oldString,
+    message.toolResult?.oldString,
+    message.toolInput?.old_string,
+  );
+  const newStr = firstDefinedString(
+    typeof matchingPatch?.newString === "string" ? matchingPatch.newString : undefined,
+    parsedStructuredDiff?.newString,
+    parsedDiff?.newString,
+    message.toolResult?.newString,
+    message.toolInput?.new_string,
+  );
 
-  if (!oldStr && !newStr) return <GenericContent message={message} />;
+  if (!oldStr && !newStr) {
+    // Fallback 1: raw diff in structuredPatch (e.g. Codex fileChange with raw content)
+    const rawDiff = typeof matchingPatch?.diff === "string" ? matchingPatch.diff : "";
+    if (rawDiff) {
+      return <UnifiedPatchViewer diffText={rawDiff} filePath={filePath} />;
+    }
+    // Fallback 2: result has content but no structuredPatch (e.g. Codex "update" kind)
+    const resultContent = typeof message.toolResult?.content === "string"
+      ? message.toolResult.content
+      : "";
+    if (resultContent) {
+      return <UnifiedPatchViewer diffText={resultContent} filePath={filePath} />;
+    }
+    return <GenericContent message={message} />;
+  }
 
-  return <DiffViewer oldString={oldStr} newString={newStr} filePath={filePath} />;
+  return (
+    <DiffViewer
+      oldString={oldStr}
+      newString={newStr}
+      filePath={filePath}
+      unifiedDiff={unifiedDiffText || undefined}
+    />
+  );
 }
 
 // ── Read: compact file info ──
@@ -718,13 +807,13 @@ function SubagentStepRow({ step }: { step: SubagentToolStep }) {
         )}
         {!hasResult && !isError ? (
           <TextShimmer as="span" duration={1.8} spread={1.5}>
-            {TOOL_ACTIVE[step.toolName] ?? step.toolName}
+            {getToolLabel(step.toolName, "active") ?? step.toolName}
           </TextShimmer>
         ) : (
           <span className={isError ? "text-red-400/70" : "text-foreground/75"}>
             {isError
-              ? `Failed to ${(TOOL_ACTIVE[step.toolName] ?? step.toolName).toLowerCase()}`
-              : (TOOL_PAST[step.toolName] ?? step.toolName)}
+              ? `Failed to ${getToolLabel(step.toolName, "failure")}`
+              : (getToolLabel(step.toolName, "past") ?? step.toolName)}
           </span>
         )}
         <span className="truncate text-foreground/40 ms-0.5">
@@ -863,7 +952,7 @@ function ExitPlanModeContent({ message }: { message: UIMessage }) {
   );
 }
 
-// ── AskUserQuestion: shows only the question text (answers handled in PermissionPrompt) ──
+// ── AskUserQuestion: show questions and, once available, user answers from toolResult ──
 
 interface AskQuestionOption {
   label: string;
@@ -880,6 +969,12 @@ interface AskQuestionItem {
 function AskUserQuestionContent({ message }: { message: UIMessage }) {
   const questions = (message.toolInput?.questions ?? []) as AskQuestionItem[];
   const hasResult = !!message.toolResult;
+  const answers = (() => {
+    const raw = message.toolResult?.answers;
+    if (!raw || typeof raw !== "object") return null;
+    return raw as Record<string, unknown>;
+  })();
+  const orderedAnswers = answers ? Object.values(answers) : [];
 
   return (
     <div className="space-y-2 text-xs">
@@ -897,6 +992,23 @@ function AskUserQuestionContent({ message }: { message: UIMessage }) {
             <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-foreground/30 italic">
               <Loader2 className="h-3 w-3 animate-spin" />
               Waiting for answer…
+            </div>
+          )}
+
+          {/* Result state after user answered AskUserQuestion */}
+          {hasResult && (
+            <div className="mt-1.5">
+              <span className="text-[11px] text-foreground/40">Answer: </span>
+              <span className="text-[12px] text-foreground/80">
+                {(() => {
+                  const direct = answers?.[q.question];
+                  if (typeof direct === "string" && direct.trim()) return direct;
+                  // Fallback for edge cases where question text keys differ
+                  const indexed = orderedAnswers[qi];
+                  if (typeof indexed === "string" && indexed.trim()) return indexed;
+                  return "No answer captured";
+                })()}
+              </span>
             </div>
           )}
         </div>
@@ -978,7 +1090,7 @@ function formatCompactSummary(message: UIMessage): string {
     const completed = todos.filter((t) => t.status === "completed").length;
     return `${completed}/${todos.length} completed`;
   }
-  if (input.command) return String(input.command).split("\n")[0].slice(0, 80);
+  if (input.command) return String(input.command).split("\n")[0];
   if (input.file_path) return String(input.file_path).split("/").pop() ?? "";
   if (input.pattern) return String(input.pattern);
   if (input.query) return String(input.query).slice(0, 60);
@@ -1035,6 +1147,12 @@ function formatBashResult(result: UIMessage["toolResult"]): string {
   if (!result) return "";
   const parts: string[] = [];
   if (result.stdout) parts.push(result.stdout);
+  if (!result.stdout && typeof result.content === "string") {
+    parts.push(result.content);
+  }
+  if (!result.stdout && Array.isArray(result.content)) {
+    parts.push(result.content.filter((c) => c.type === "text").map((c) => c.text).join("\n"));
+  }
   if (result.stderr) parts.push(result.stderr);
   return parts.join("\n") || "(no output)";
 }

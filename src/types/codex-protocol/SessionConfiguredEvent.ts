@@ -5,13 +5,14 @@ import type { AskForApproval } from "./AskForApproval";
 import type { EventMsg } from "./EventMsg";
 import type { ReasoningEffort } from "./ReasoningEffort";
 import type { SandboxPolicy } from "./SandboxPolicy";
+import type { SessionNetworkProxyRuntime } from "./SessionNetworkProxyRuntime";
 import type { ThreadId } from "./ThreadId";
 
-export type SessionConfiguredEvent = { 
+export type SessionConfiguredEvent = { session_id: ThreadId, forked_from_id: ThreadId | null, 
 /**
- * Name left as session_id instead of thread_id for backwards compatibility.
+ * Optional user-facing thread name (may be unset).
  */
-session_id: ThreadId, 
+thread_name?: string, 
 /**
  * Tell the client what model is being queried.
  */
@@ -45,4 +46,12 @@ history_entry_count: number,
  * Optional initial messages (as events) for resumed sessions.
  * When present, UIs can use these to seed the history.
  */
-initial_messages: Array<EventMsg> | null, rollout_path: string, };
+initial_messages: Array<EventMsg> | null, 
+/**
+ * Runtime proxy bind addresses, when the managed proxy was started for this session.
+ */
+network_proxy?: SessionNetworkProxyRuntime, 
+/**
+ * Path in which the rollout is stored. Can be `None` for ephemeral threads
+ */
+rollout_path: string | null, };

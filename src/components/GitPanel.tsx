@@ -262,37 +262,6 @@ export const GitPanel = memo(function GitPanel({
               variant="ghost"
               size="icon"
               className="h-5 w-5 shrink-0 text-foreground/30 hover:text-foreground/60"
-              onClick={openCreateDialog}
-            >
-              <Plus className="h-3 w-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={4}>
-            <p className="text-xs">Create Worktree</p>
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5 shrink-0 text-foreground/30 hover:text-foreground/60 disabled:opacity-30"
-              onClick={openRemoveDialog}
-              disabled={linkedWorktrees.length === 0}
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={4}>
-            <p className="text-xs">Remove Worktree</p>
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5 shrink-0 text-foreground/30 hover:text-foreground/60"
               onClick={() => git.refreshAll()}
             >
               <RefreshCw className="h-3 w-3" />
@@ -306,7 +275,41 @@ export const GitPanel = memo(function GitPanel({
 
       {onSelectWorktreePath && repoOptions.length > 0 && (
         <div className="px-3 pb-2">
-          <label className="mb-1 block text-[10px] uppercase tracking-wider text-foreground/25">Agent Worktree</label>
+          <div className="mb-1 flex items-center gap-1">
+            <label className="text-[10px] uppercase tracking-wider text-foreground/25">Agent Worktree</label>
+            <div className="min-w-0 flex-1" />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 shrink-0 text-foreground/30 hover:text-foreground/60"
+                  onClick={openCreateDialog}
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={4}>
+                <p className="text-xs">Create Worktree</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 shrink-0 text-foreground/30 hover:text-foreground/60 disabled:opacity-30"
+                  onClick={openRemoveDialog}
+                  disabled={linkedWorktrees.length === 0}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={4}>
+                <p className="text-xs">Remove Worktree</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <InlineSelector
             value={selectedCwdValue}
             onChange={onSelectWorktreePath}

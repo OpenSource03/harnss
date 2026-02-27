@@ -69,7 +69,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OpenACP-UI-mac
+          name: Harnss-mac
           path: |
             release/**/*.dmg
             release/**/*.zip
@@ -116,7 +116,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OpenACP-UI-win
+          name: Harnss-win
           path: |
             release/**/*.exe
             release/**/*.yml
@@ -205,7 +205,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OpenACP-UI-linux
+          name: Harnss-linux
           path: |
             release/**/*.AppImage
             release/**/*.deb

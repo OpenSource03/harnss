@@ -125,7 +125,7 @@ export const ToolPicker = memo(function ToolPicker({ activeTools, onToggle, avai
                     className={`relative flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200 cursor-pointer ${
                       isActive
                         ? "bg-foreground/10 text-foreground shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] ring-1 ring-foreground/[0.08]"
-                        : "text-foreground/30 hover:text-foreground/60 hover:bg-foreground/[0.05]"
+                        : "text-foreground/40 hover:text-foreground/70 hover:bg-foreground/[0.05]"
                     }`}
                   >
                     <Icon className="h-5 w-5" strokeWidth={isActive ? 2 : 1.5} />
@@ -159,7 +159,7 @@ export const ToolPicker = memo(function ToolPicker({ activeTools, onToggle, avai
                 className={`relative flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200 cursor-pointer ${
                   isActive
                     ? "bg-foreground/10 text-foreground shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] ring-1 ring-foreground/[0.08]"
-                    : "text-foreground/30 hover:text-foreground/60 hover:bg-foreground/[0.05]"
+                    : "text-foreground/40 hover:text-foreground/70 hover:bg-foreground/[0.05]"
                 } ${isDragTarget ? "ring-2 ring-foreground/20" : ""}`}
               >
                 <Icon className="h-5 w-5" strokeWidth={isActive ? 2 : 1.5} />
@@ -186,7 +186,7 @@ export const ToolPicker = memo(function ToolPicker({ activeTools, onToggle, avai
                     onClick={handleOpenInEditor}
                     onContextMenu={handleEditorContextMenu}
                     className="flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200 cursor-pointer
-                      text-foreground/30 hover:text-foreground/60 hover:bg-foreground/[0.05]"
+                      text-foreground/40 hover:text-foreground/70 hover:bg-foreground/[0.05]"
                   >
                     <SquareArrowOutUpRight className="h-5 w-5" strokeWidth={1.5} />
                   </button>

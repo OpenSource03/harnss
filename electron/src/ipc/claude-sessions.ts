@@ -1,24 +1,62 @@
 import { BrowserWindow, ipcMain } from "electron";
 import crypto from "crypto";
+import os from "os";
 import { log } from "../lib/logger";
 import { safeSend } from "../lib/safe-send";
 import { AsyncChannel } from "../lib/async-channel";
-import { getSDK, getCliPath } from "../lib/sdk";
+import { getSDK, getCliPath, clientAppEnv } from "../lib/sdk";
 import type { QueryHandle } from "../lib/sdk";
 import { getMcpAuthHeaders } from "../lib/mcp-oauth-flow";
+import { getClaudeModelsCache, setClaudeModelsCache } from "../lib/claude-model-cache";
 
 /** SDK options for file checkpointing — enables Write/Edit/NotebookEdit revert support */
 function fileCheckpointOptions(): Record<string, unknown> {
   return {
     enableFileCheckpointing: true,
     extraArgs: { "replay-user-messages": null }, // required to receive checkpoint UUIDs
-    env: { ...process.env, CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: "1" },
+    env: { ...process.env, ...clientAppEnv(), CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: "1" },
   };
 }
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+// ── Plan mode system prompt ──
+// Appended to the Claude Code preset when permissionMode is "plan".
+// Mirrors the Codex desktop approach: 3-phase conversational planning with
+// <proposed_plan> output format so ProposedPlanCard can render it uniformly.
+const PLAN_MODE_SYSTEM_PROMPT = `
+You are in PLAN MODE. Your goal is to understand the user's request and create a detailed implementation plan WITHOUT making any changes to files.
+
+## Rules
+1. You may ONLY use read-only tools (Read, Glob, Grep, Bash for non-mutating commands like ls, git status, find, tree). Do NOT use Write, Edit, NotebookEdit, or any tool that modifies files.
+2. Ask clarifying questions when the request is ambiguous.
+3. When you have gathered enough context and are ready to propose a plan, wrap it in a <proposed_plan> block.
+
+## Phases
+1. **Explore** — ground yourself in the codebase. Read files, search for patterns, inspect configs. Resolve unknowns by discovery, not by asking.
+2. **Clarify** — once you understand the landscape, ask only questions whose answers would materially change the plan (tradeoffs, preferences, scope decisions).
+3. **Plan** — output a single <proposed_plan> block with a decision-complete spec.
+
+## Plan Output Format
+When ready, output your plan exactly like this:
+
+<proposed_plan title="Short title">
+Your detailed implementation plan in markdown. Include:
+- Step-by-step implementation approach
+- Files to create or modify (with paths)
+- Key code changes with snippets where helpful
+- Edge cases and risks
+- Testing / verification approach
+</proposed_plan>
+
+## Important
+- Do NOT ask "should I proceed?" or "shall I implement this?" after outputting the plan.
+- Do NOT make any file modifications.
+- Only output one <proposed_plan> block per turn, and only when you are presenting a complete spec.
+- The plan should be specific enough that another agent could implement it without making decisions.
+`.trim();
 
 type PermissionResult =
   | { behavior: "allow"; updatedInput?: Record<string, unknown> }
@@ -36,8 +74,10 @@ interface SessionEntry {
   startOptions?: StartOptions;
   /** When true, the old event loop should NOT send claude:exit on teardown */
   restarting?: boolean;
-  /** When true, user initiated stop — suppress expected SDK teardown errors */
+  /** When true, a stop was requested — suppress expected SDK teardown errors */
   stopping?: boolean;
+  /** Why the stop was requested (user action, cleanup, etc.). */
+  stopReason?: string;
 }
 
 export const sessions = new Map<string, SessionEntry>();
@@ -113,6 +153,20 @@ function summarizeEvent(event: Record<string, unknown>): string {
   }
 }
 
+function parseStopRequest(
+  payload: string | { sessionId: string; reason?: string },
+): { sessionId: string; reason: string } {
+  if (typeof payload === "string") {
+    return { sessionId: payload, reason: "user" };
+  }
+  return {
+    sessionId: payload.sessionId,
+    reason: typeof payload.reason === "string" && payload.reason.length > 0
+      ? payload.reason
+      : "user",
+  };
+}
+
 interface McpServerInput {
   name: string;
   transport: "stdio" | "sse" | "http";
@@ -127,12 +181,72 @@ interface StartOptions {
   cwd?: string;
   model?: string;
   permissionMode?: string;
+  thinkingEnabled?: boolean;
   resume?: string;
   /** Fork to a new session ID when resuming (model forgets messages after resumeSessionAt) */
   forkSession?: boolean;
   /** Resume at a specific message UUID — used with forkSession to truncate history */
   resumeSessionAt?: string;
   mcpServers?: McpServerInput[];
+}
+
+function buildThinkingConfig(thinkingEnabled?: boolean): { type: "adaptive" } | { type: "disabled" } {
+  return thinkingEnabled === false
+    ? { type: "disabled" }
+    : { type: "adaptive" };
+}
+
+let modelsRevalidationPromise: Promise<{ models: Array<Record<string, unknown>>; updatedAt?: number; error?: string }> | null = null;
+
+async function revalidateClaudeModelsCache(cwd?: string): Promise<{ models: Array<Record<string, unknown>>; updatedAt?: number; error?: string }> {
+  if (modelsRevalidationPromise) return modelsRevalidationPromise;
+
+  modelsRevalidationPromise = (async () => {
+    const existing = getClaudeModelsCache();
+    let queryHandle: QueryHandle | null = null;
+    const channel = new AsyncChannel<unknown>();
+
+    try {
+      const query = await getSDK();
+      const queryOptions: Record<string, unknown> = {
+        cwd: cwd?.trim() || os.homedir(),
+        includePartialMessages: true,
+        thinking: buildThinkingConfig(true),
+        settingSources: ["user", "project"],
+        pathToClaudeCodeExecutable: getCliPath(),
+        ...fileCheckpointOptions(),
+      };
+
+      queryHandle = query({ prompt: channel, options: queryOptions });
+      if (!queryHandle.supportedModels) {
+        return { models: existing.models, updatedAt: existing.updatedAt };
+      }
+
+      const models = await queryHandle.supportedModels();
+      if (Array.isArray(models) && models.length > 0) {
+        const next = setClaudeModelsCache(models);
+        return { models: next.models, updatedAt: next.updatedAt };
+      }
+
+      return { models: existing.models, updatedAt: existing.updatedAt };
+    } catch (err) {
+      const message = errorMessage(err);
+      log("MODELS_CACHE_REVALIDATE_ERR", message);
+      return { models: existing.models, updatedAt: existing.updatedAt, error: message };
+    } finally {
+      channel.close();
+      if (queryHandle) {
+        try {
+          queryHandle.close();
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+      modelsRevalidationPromise = null;
+    }
+  })();
+
+  return modelsRevalidationPromise;
 }
 
 // ── Build SDK-compatible MCP config from server inputs (with fresh auth headers) ──
@@ -215,7 +329,7 @@ async function restartSession(
   const queryOptions: Record<string, unknown> = {
     cwd: opts.cwd || process.cwd(),
     includePartialMessages: true,
-    thinking: { type: "enabled", budgetTokens: 16000 },
+    thinking: buildThinkingConfig(opts.thinkingEnabled),
     canUseTool,
     settingSources: ["user", "project"],
     pathToClaudeCodeExecutable: getCliPath(),
@@ -272,17 +386,17 @@ async function restartSession(
       }
     } catch (err) {
       restartQueryError = errorMessage(err);
-      log("QUERY_ERROR", `${logPrefix} stopping=${!!newSession.stopping} ${restartQueryError}`);
-    } finally {
-      if (!newSession.restarting) {
-        // User-initiated stop: treat teardown errors as clean exit
-        const isUserStop = newSession.stopping;
-        const exitCode = (restartQueryError && !isUserStop) ? 1 : 0;
-        log("EXIT", `${logPrefix} total_events=${newSession.eventCounter} userStop=${!!isUserStop} error=${restartQueryError ?? "none"}`);
+        log("QUERY_ERROR", `${logPrefix} stopping=${!!newSession.stopping} reason=${newSession.stopReason ?? "none"} ${restartQueryError}`);
+      } finally {
+        if (!newSession.restarting) {
+        // Requested stop: treat teardown errors as clean exit
+        const stopRequested = newSession.stopping;
+        const exitCode = (restartQueryError && !stopRequested) ? 1 : 0;
+        log("EXIT", `${logPrefix} total_events=${newSession.eventCounter} stopRequested=${!!stopRequested} stopReason=${newSession.stopReason ?? "none"} error=${restartQueryError ?? "none"}`);
         sessions.delete(sessionId);
         safeSend(getMainWindow,"claude:exit", {
           code: exitCode, _sessionId: sessionId,
-          ...((restartQueryError && !isUserStop) ? { error: restartQueryError } : {}),
+          ...((restartQueryError && !stopRequested) ? { error: restartQueryError } : {}),
         });
       } else {
         log("EXIT_RESTART", `${logPrefix} old loop ended (restarting)`);
@@ -342,7 +456,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
       const queryOptions: Record<string, unknown> = {
         cwd: options.cwd || process.cwd(),
         includePartialMessages: true,
-        thinking: { type: "enabled", budgetTokens: 16000 },
+        thinking: buildThinkingConfig(options.thinkingEnabled),
         canUseTool,
         settingSources: ["user", "project"],
         pathToClaudeCodeExecutable: getCliPath(),
@@ -371,6 +485,14 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
       }
       if (options.permissionMode === "bypassPermissions") {
         queryOptions.allowDangerouslySkipPermissions = true;
+      }
+      // In plan mode, append instructions that guide Claude to produce <proposed_plan> blocks
+      if (options.permissionMode === "plan") {
+        queryOptions.systemPrompt = {
+          type: "preset",
+          preset: "claude_code",
+          append: PLAN_MODE_SYSTEM_PROMPT,
+        };
       }
       if (options.model) {
         queryOptions.model = options.model;
@@ -402,18 +524,18 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
           }
         } catch (err) {
           queryError = errorMessage(err);
-          log("QUERY_ERROR", `session=${sessionId.slice(0, 8)} stopping=${!!session.stopping} ${queryError}`);
+          log("QUERY_ERROR", `session=${sessionId.slice(0, 8)} stopping=${!!session.stopping} reason=${session.stopReason ?? "none"} ${queryError}`);
         } finally {
           // If restarting, the new loop takes over — don't send exit or delete
           if (!session.restarting) {
-            // User-initiated stop: treat teardown errors as clean exit
-            const isUserStop = session.stopping;
-            const exitCode = (queryError && !isUserStop) ? 1 : 0;
-            log("EXIT", `session=${sessionId.slice(0, 8)} total_events=${session.eventCounter} userStop=${!!isUserStop} error=${queryError ?? "none"}`);
+            // Requested stop: treat teardown errors as clean exit
+            const stopRequested = session.stopping;
+            const exitCode = (queryError && !stopRequested) ? 1 : 0;
+            log("EXIT", `session=${sessionId.slice(0, 8)} total_events=${session.eventCounter} stopRequested=${!!stopRequested} stopReason=${session.stopReason ?? "none"} error=${queryError ?? "none"}`);
             sessions.delete(sessionId);
             safeSend(getMainWindow,"claude:exit", {
               code: exitCode, _sessionId: sessionId,
-              ...((queryError && !isUserStop) ? { error: queryError } : {}),
+              ...((queryError && !stopRequested) ? { error: queryError } : {}),
             });
           } else {
             log("EXIT_RESTART", `session=${sessionId.slice(0, 8)} old loop ended (restarting)`);
@@ -532,26 +654,54 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
     }
   });
 
+  ipcMain.handle("claude:set-thinking", async (_event, { sessionId, thinkingEnabled }: { sessionId: string; thinkingEnabled: boolean }) => {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      log("SET_THINKING", `ERROR: session ${sessionId?.slice(0, 8)} not found`);
+      return { error: "Claude session not found" };
+    }
+    if (!session.queryHandle?.setMaxThinkingTokens) {
+      log("SET_THINKING", `ERROR: session=${sessionId.slice(0, 8)} setMaxThinkingTokens unsupported`);
+      return { error: "Reasoning toggle is not supported by this Claude SDK version" };
+    }
+    try {
+      await session.queryHandle.setMaxThinkingTokens(thinkingEnabled ? null : 0);
+      if (session.startOptions) {
+        session.startOptions.thinkingEnabled = thinkingEnabled;
+      }
+      log("SET_THINKING", `session=${sessionId.slice(0, 8)} thinkingEnabled=${thinkingEnabled}`);
+      return { ok: true };
+    } catch (err) {
+      log("SET_THINKING_ERR", `session=${sessionId.slice(0, 8)} thinkingEnabled=${thinkingEnabled} ${errorMessage(err)}`);
+      return { error: errorMessage(err) };
+    }
+  });
+
   ipcMain.on("claude:log", (_event, label: string, data: unknown) => {
     log(`UI:${label}`, data);
   });
 
-  ipcMain.handle("claude:stop", (_event, sessionId: string) => {
-    const session = sessions.get(sessionId);
-    if (session) {
-      // Mark as user-initiated stop so teardown errors are suppressed
-      session.stopping = true;
-      // Drain pending permissions before closing
-      for (const [, pending] of session.pendingPermissions) {
-        pending.resolve({ behavior: "deny", message: "Session stopped" });
+  ipcMain.handle(
+    "claude:stop",
+    (_event, payload: string | { sessionId: string; reason?: string }) => {
+      const { sessionId, reason } = parseStopRequest(payload);
+      const session = sessions.get(sessionId);
+      if (session) {
+        // Mark as requested stop so teardown errors are suppressed
+        session.stopping = true;
+        session.stopReason = reason;
+        // Drain pending permissions before closing
+        for (const [, pending] of session.pendingPermissions) {
+          pending.resolve({ behavior: "deny", message: "Session stopped" });
+        }
+        session.pendingPermissions.clear();
+        session.channel.close();
+        session.queryHandle?.close();
+        // Let the event loop's finally block handle sessions.delete + claude:exit
       }
-      session.pendingPermissions.clear();
-      session.channel.close();
-      session.queryHandle?.close();
-      // Let the event loop's finally block handle sessions.delete + claude:exit
-    }
-    return { ok: true };
-  });
+      return { ok: true };
+    },
+  );
 
   ipcMain.handle("claude:interrupt", async (_event, sessionId: string) => {
     const session = sessions.get(sessionId);
@@ -610,11 +760,23 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
     if (!session?.queryHandle?.supportedModels) return { models: [] };
     try {
       const models = await session.queryHandle.supportedModels();
+      if (Array.isArray(models) && models.length > 0) {
+        setClaudeModelsCache(models);
+      }
       return { models };
     } catch (err) {
       log("SUPPORTED_MODELS_ERR", `session=${sessionId.slice(0, 8)} ${errorMessage(err)}`);
       return { models: [], error: errorMessage(err) };
     }
+  });
+
+  ipcMain.handle("claude:models-cache:get", async () => {
+    const cached = getClaudeModelsCache();
+    return { models: cached.models, updatedAt: cached.updatedAt };
+  });
+
+  ipcMain.handle("claude:models-cache:revalidate", async (_event, options?: { cwd?: string }) => {
+    return revalidateClaudeModelsCache(options?.cwd);
   });
 
   ipcMain.handle("claude:mcp-reconnect", async (_event, { sessionId, serverName }: { sessionId: string; serverName: string }) => {
