@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/tooltip";
 import { AgentIcon } from "@/components/AgentIcon";
 import { useAgentStore } from "@/hooks/useAgentStore";
+import type { BinaryCheckResult } from "@/hooks/useAgentStore";
 import {
   registryAgentToDefinition,
   hasUpdate,
@@ -43,12 +44,18 @@ type CardStatus = "available" | "installed" | "update" | "manual";
 function getCardStatus(
   registryAgent: RegistryAgent,
   installedMap: Map<string, InstalledAgent>,
+  binaryPaths: Record<string, BinaryCheckResult>,
 ): CardStatus {
-  if (!isInstallable(registryAgent)) return "manual";
+  // Check installed first — covers both npx and manually-configured binary agents
   const installed = installedMap.get(registryAgent.id);
-  if (!installed) return "available";
-  if (hasUpdate(installed, registryAgent)) return "update";
-  return "installed";
+  if (installed) {
+    if (isInstallable(registryAgent, binaryPaths) && hasUpdate(installed, registryAgent))
+      return "update";
+    return "installed";
+  }
+  // Not installed — check if we can auto-install (npx or detected binary)
+  if (!isInstallable(registryAgent, binaryPaths)) return "manual";
+  return "available";
 }
 
 /** Format author list — strip email addresses for cleaner display. */
@@ -232,7 +239,7 @@ export const AgentStore = memo(function AgentStore({
   onInstall,
   onUninstall,
 }: AgentStoreProps) {
-  const { registryAgents, isLoading, error, refresh } = useAgentStore();
+  const { registryAgents, isLoading, error, binaryPaths, refresh } = useAgentStore();
   const [search, setSearch] = useState("");
   const [installing, setInstalling] = useState<Set<string>>(new Set());
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -262,7 +269,9 @@ export const AgentStore = memo(function AgentStore({
 
   const handleInstall = useCallback(
     async (registryAgent: RegistryAgent) => {
-      const def = registryAgentToDefinition(registryAgent);
+      // Pass resolved binary info so binary-only agents get the system path
+      const binaryInfo = binaryPaths[registryAgent.id] ?? undefined;
+      const def = registryAgentToDefinition(registryAgent, binaryInfo);
       if (!def) return;
       setInstalling((prev) => new Set(prev).add(registryAgent.id));
       try {
@@ -275,7 +284,7 @@ export const AgentStore = memo(function AgentStore({
         });
       }
     },
-    [onInstall],
+    [onInstall, binaryPaths],
   );
 
   const handleUninstall = useCallback(
@@ -346,7 +355,7 @@ export const AgentStore = memo(function AgentStore({
         <ScrollArea className="min-h-0 flex-1">
           <div className="grid grid-cols-2 gap-3 px-5 pb-5">
             {filtered.map((agent) => {
-              const status = getCardStatus(agent, installedMap);
+              const status = getCardStatus(agent, installedMap, binaryPaths);
               return (
                 <StoreAgentCard
                   key={agent.id}

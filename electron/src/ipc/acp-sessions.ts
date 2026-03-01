@@ -80,6 +80,8 @@ interface ACPSessionEntry {
   utilitySessionIds?: Set<string>;
   /** Text accumulator buffers for utility sessions, keyed by ACP sessionId */
   utilityTextBuffers?: Map<string, string>;
+  /** Last actionable stderr error line observed from the ACP agent process */
+  lastStderrError?: string;
 }
 
 export const acpSessions = new Map<string, ACPSessionEntry>();
@@ -248,7 +250,14 @@ async function createAcpConnection(
   });
 
   proc.stderr?.on("data", (chunk: Buffer) => {
-    log("ACP_STDERR", `session=${internalId.slice(0, 8)} ${chunk.toString().trim()}`);
+    const raw = chunk.toString().trim();
+    log("ACP_STDERR", `session=${internalId.slice(0, 8)} ${raw}`);
+    const cleaned = raw.replace(/\x1b\[[0-9;]*m/g, "");
+    const turnError = cleaned.match(/Unhandled error during turn:\s*(.+)$/)?.[1]?.trim();
+    const parsed = turnError || (/\bERROR\b/i.test(cleaned) ? cleaned : undefined);
+    if (!parsed) return;
+    const entry = acpSessions.get(internalId);
+    if (entry) entry.lastStderrError = parsed;
   });
 
   proc.on("exit", (code) => {
@@ -552,6 +561,7 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
     prompt.push({ type: "text", text });
 
     try {
+      session.lastStderrError = undefined;
       const result = await session.connection.prompt({
         sessionId: session.acpSessionId,
         prompt,
@@ -567,8 +577,10 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
 
       return { ok: true };
     } catch (err) {
-      log("ACP_SEND", `ERROR: session=${sessionId.slice(0, 8)} ${extractErrorMessage(err)}`);
-      return { error: extractErrorMessage(err) };
+      const msg = extractErrorMessage(err);
+      const surfacedError = msg === "Internal error" && session.lastStderrError ? session.lastStderrError : msg;
+      log("ACP_SEND", `ERROR: session=${sessionId.slice(0, 8)} ${surfacedError}`);
+      return { error: surfacedError };
     }
   });
 
@@ -674,10 +686,12 @@ export function register(getMainWindow: () => BrowserWindow | null): void {
     try {
       await session.connection.cancel({ sessionId: session.acpSessionId });
       log("ACP_CANCEL", `session=${sessionId.slice(0, 8)} acknowledged`);
+      return { ok: true };
     } catch (err) {
-      log("ACP_CANCEL", `ERROR: session=${sessionId.slice(0, 8)} ${extractErrorMessage(err)}`);
+      const msg = extractErrorMessage(err);
+      log("ACP_CANCEL", `ERROR: session=${sessionId.slice(0, 8)} ${msg}`);
+      return { error: msg };
     }
-    return { ok: true };
   });
 
   ipcMain.handle("acp:set-config", async (_event, { sessionId, configId, value }: { sessionId: string; configId: string; value: string }) => {

@@ -1,6 +1,10 @@
 import fs from "fs";
 import path from "path";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { app } from "electron";
+
+const execFileAsync = promisify(execFile);
 
 export type EngineId = "claude" | "acp" | "codex";
 
@@ -95,4 +99,65 @@ function persistUserAgents(): void {
   const dir = path.dirname(getConfigPath());
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(getConfigPath(), JSON.stringify(userAgents, null, 2));
+}
+
+// ── Binary detection helpers ──
+
+/** Map process.platform + process.arch to the registry's platform key format. */
+export function getRegistryPlatformKey(): string | null {
+  const archMap: Record<string, string> = { arm64: "aarch64", x64: "x86_64" };
+  const platformMap: Record<string, string> = { darwin: "darwin", linux: "linux", win32: "windows" };
+  const platform = platformMap[process.platform];
+  const arch = archMap[process.arch];
+  if (!platform || !arch) return null;
+  return `${platform}-${arch}`;
+}
+
+/** Resolve a command name to its absolute path via `which` (or `where` on Windows). */
+async function resolveWhich(cmd: string): Promise<string | null> {
+  try {
+    const whichCmd = process.platform === "win32" ? "where" : "which";
+    const { stdout } = await execFileAsync(whichCmd, [cmd]);
+    // `where` on Windows may return multiple lines; take the first
+    return stdout.trim().split("\n")[0] || null;
+  } catch {
+    return null; // command not found
+  }
+}
+
+/** Strip leading "./" and trailing ".exe" from a registry cmd to get the bare binary name. */
+function extractBinaryName(cmd: string): string {
+  return cmd.replace(/^\.\//, "").replace(/\.exe$/i, "");
+}
+
+export interface BinaryCheckResult {
+  path: string;
+  args?: string[];
+}
+
+/**
+ * Batch-check which binary-only agents have their command available on the system PATH.
+ * Receives raw binary distribution maps from registry agents, resolves the current platform,
+ * and runs `which`/`where` for each matching command.
+ */
+export async function checkBinaries(
+  agents: Array<{ id: string; binary: Record<string, { cmd: string; args?: string[] }> }>,
+): Promise<Record<string, BinaryCheckResult | null>> {
+  const key = getRegistryPlatformKey();
+  if (!key) return {};
+
+  const results: Record<string, BinaryCheckResult | null> = {};
+  await Promise.all(
+    agents.map(async ({ id, binary }) => {
+      const target = binary[key];
+      if (!target) {
+        results[id] = null;
+        return;
+      }
+      const cmdName = extractBinaryName(target.cmd);
+      const resolved = await resolveWhich(cmdName);
+      results[id] = resolved ? { path: resolved, args: target.args } : null;
+    }),
+  );
+  return results;
 }

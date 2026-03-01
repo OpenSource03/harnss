@@ -18,6 +18,12 @@ export function normalizeToolInput(
   locations?: Array<{ path: string; line?: number }>,
 ): Record<string, unknown> {
   if (rawInput === null || rawInput === undefined || typeof rawInput !== "object" || Array.isArray(rawInput)) {
+    // Even with non-object rawInput (e.g., edit patch text), extract file_path from locations
+    if (kind && locations?.length) {
+      if (kind === "edit" || kind === "read" || kind === "delete") {
+        return { file_path: locations[0].path };
+      }
+    }
     return {};
   }
 
@@ -45,6 +51,12 @@ export function normalizeToolInput(
   const shellCommand = extractShellCommand(raw.command);
 
   switch (kind) {
+    case "think": {
+      const todos = parseTodosFromUnknown(raw.todos);
+      if (todos) return { todos };
+      return raw;
+    }
+
     case "read": {
       const filePath = locations?.[0]?.path
         ?? (firstParsed?.path ? resolveRelativePath(firstParsed.path, raw.cwd as string | undefined) : null);
@@ -113,6 +125,20 @@ function resolveRelativePath(path: string, cwd?: string | null): string {
   return `${cwd.replace(/\/$/, "")}/${path}`;
 }
 
+function parseTodosFromUnknown(value: unknown): Array<{ content: string; status: "pending" | "completed" }> | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const todos: Array<{ content: string; status: "pending" | "completed" }> = [];
+  for (const line of value.split("\n")) {
+    const match = line.match(/^\s*-\s*\[(x|X| )\]\s+(.+)$/);
+    if (!match) continue;
+    todos.push({
+      content: match[2].trim(),
+      status: match[1].toLowerCase() === "x" ? "completed" : "pending",
+    });
+  }
+  return todos.length > 0 ? todos : null;
+}
+
 export function normalizeToolResult(rawOutput: unknown, content?: unknown[]): Record<string, unknown> | undefined {
   if (!rawOutput && (!content || content.length === 0)) return undefined;
 
@@ -132,6 +158,12 @@ export function normalizeToolResult(rawOutput: unknown, content?: unknown[]): Re
         result.newString = item.newText;
       }
     }
+  }
+
+  // ACP agents put file contents / search results in `content` but renderers check `stdout`.
+  // Copy content to stdout so ReadContent, SearchContent, formatResult() all pick it up.
+  if (!result.file && !result.stdout && typeof result.content === "string") {
+    result.stdout = result.content;
   }
 
   return Object.keys(result).length > 0 ? result : undefined;
@@ -166,15 +198,36 @@ export function pickAutoResponseOption(
   return null;
 }
 
-export function deriveToolName(title: string, kind?: string): string {
+export function deriveToolName(
+  title: string,
+  kind?: string,
+  rawInput?: unknown,
+): string {
+  const input = (rawInput && typeof rawInput === "object" && !Array.isArray(rawInput))
+    ? rawInput as Record<string, unknown>
+    : null;
+
   if (kind) {
+    if (kind === "think") {
+      if (title === "update_todo" || input?.todos != null) return "TodoWrite";
+      return "Think";
+    }
+    if (kind === "read" && typeof input?.pattern === "string") {
+      return "Glob";
+    }
+    // ACP "other" kind — route based on title (rg → Grep, find/fd → Glob)
+    if (kind === "other") {
+      const titleLower = title.toLowerCase();
+      if (titleLower === "rg" || titleLower === "ripgrep") return "Grep";
+      if (titleLower === "find" || titleLower === "fd") return "Glob";
+      return title;
+    }
     const kindMap: Record<string, string> = {
       read: "Read",
       edit: "Edit",
       delete: "Write",
       execute: "Bash",
       search: "Bash", // ACP search runs shell commands (rg, find, etc.)
-      think: "Think",
       fetch: "WebFetch",
     };
     return kindMap[kind] ?? title;

@@ -45,14 +45,16 @@ export function TabBar<T extends TabBarTab>({
   activeClass = "bg-foreground/[0.08] text-foreground/90",
   inactiveClass = "text-foreground/45 hover:text-foreground/65 hover:bg-foreground/[0.04]",
 }: TabBarProps<T>) {
+  const hasHeaderLabel = headerLabel.trim().length > 0;
+
   return (
     <div className="flex items-center gap-1 px-2 pt-2 pb-1">
-      <div className="flex items-center gap-1.5 ps-1.5">
+      <div className={`flex items-center ps-1.5 ${hasHeaderLabel ? "gap-1.5" : "gap-0"}`}>
         <HeaderIcon className="h-3.5 w-3.5 text-foreground/50" />
-        <span className="text-xs font-medium text-foreground/60">{headerLabel}</span>
+        {hasHeaderLabel && <span className="text-xs font-medium text-foreground/60">{headerLabel}</span>}
       </div>
 
-      <div className="ms-2 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+      <div className={`flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto ${hasHeaderLabel ? "ms-2" : "ms-1"}`}>
         {tabs.map((tab) => (
           <button
             key={tab.id}

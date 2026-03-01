@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { RegistryAgent, RegistryData } from "@/types";
 
 const REGISTRY_URL =
@@ -11,14 +11,50 @@ interface CacheEntry {
   timestamp: number;
 }
 
+export interface BinaryCheckResult {
+  path: string;
+  args?: string[];
+}
+
 /**
  * Fetches the ACP agent registry from the CDN.
  * Uses sessionStorage cache (15 min TTL) to avoid re-fetching on every settings open.
+ * After registry loads, checks which binary-only agents are installed on the system PATH.
  */
 export function useAgentStore() {
   const [registryAgents, setRegistryAgents] = useState<RegistryAgent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [binaryPaths, setBinaryPaths] = useState<Record<string, BinaryCheckResult>>({});
+
+  // Track latest agents for the binary check effect to avoid stale closures
+  const latestAgentsRef = useRef<RegistryAgent[]>([]);
+  latestAgentsRef.current = registryAgents;
+
+  const checkBinaries = useCallback(async (agents: RegistryAgent[]) => {
+    // Collect binary-only agents (have binary distribution, no npx)
+    const binaryAgents = agents
+      .filter((a) => !a.distribution.npx && a.distribution.binary)
+      .map((a) => ({ id: a.id, binary: a.distribution.binary! }));
+
+    if (binaryAgents.length === 0) {
+      setBinaryPaths({});
+      return;
+    }
+
+    try {
+      const results = await window.claude.agents.checkBinaries(binaryAgents);
+      // Only keep agents that were found on the system
+      const found: Record<string, BinaryCheckResult> = {};
+      for (const [id, result] of Object.entries(results)) {
+        if (result) found[id] = result;
+      }
+      setBinaryPaths(found);
+    } catch {
+      // Silently fail — binary detection is best-effort
+      setBinaryPaths({});
+    }
+  }, []);
 
   const fetchRegistry = useCallback(async (force?: boolean) => {
     // Check sessionStorage cache first (skip if force refresh)
@@ -65,10 +101,19 @@ export function useAgentStore() {
     fetchRegistry();
   }, [fetchRegistry]);
 
+  // Run binary checks in the background after registry loads
+  useEffect(() => {
+    if (registryAgents.length > 0) {
+      checkBinaries(registryAgents);
+    }
+  }, [registryAgents, checkBinaries]);
+
   return {
     registryAgents,
     isLoading,
     error,
+    /** Map of agent id → resolved binary path + args for agents found on the system. */
+    binaryPaths,
     /** Re-fetch registry, bypassing cache */
     refresh: useCallback(() => fetchRegistry(true), [fetchRegistry]),
   };

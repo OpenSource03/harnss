@@ -258,6 +258,10 @@ declare global {
         save: (agent: InstalledAgent) => Promise<{ ok?: boolean; error?: string }>;
         delete: (id: string) => Promise<{ ok?: boolean; error?: string }>;
         updateCachedConfig: (agentId: string, configOptions: ACPConfigOption[]) => Promise<{ ok?: boolean }>;
+        /** Batch-check if binary-only agents are installed on the system PATH. */
+        checkBinaries: (
+          agents: Array<{ id: string; binary: Record<string, { cmd: string; args?: string[] }> }>,
+        ) => Promise<Record<string, { path: string; args?: string[] } | null>>;
       };
       settings: {
         get: () => Promise<AppSettings>;

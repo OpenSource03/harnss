@@ -100,7 +100,7 @@ export function ToolsPanel({
         onCloseTab={onCloseTerminal}
         onNewTab={onCreateTerminal}
         headerIcon={TerminalIcon}
-        headerLabel="Tools"
+        headerLabel=""
         renderTabIcon={() => <ChevronDown className="h-2.5 w-2.5 opacity-50" />}
       />
 

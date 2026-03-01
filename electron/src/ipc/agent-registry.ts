@@ -5,6 +5,7 @@ import {
   deleteAgent,
   loadUserAgents,
   updateCachedConfig,
+  checkBinaries,
 } from "../lib/agent-registry";
 import type { InstalledAgent } from "../lib/agent-registry";
 
@@ -24,4 +25,11 @@ export function register(): void {
     updateCachedConfig(agentId, configOptions);
     return { ok: true };
   });
+
+  // Batch-check if binary-only agents are installed on the system PATH
+  ipcMain.handle(
+    "agents:check-binaries",
+    (_e, agents: Array<{ id: string; binary: Record<string, { cmd: string; args?: string[] }> }>) =>
+      checkBinaries(agents),
+  );
 }

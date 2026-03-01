@@ -128,6 +128,8 @@ export interface ToolUseResult {
   totalToolUseCount?: number;
   /** AskUserQuestion answers keyed by question text */
   answers?: Record<string, unknown>;
+  /** ACP agents include a detailed version of the result (e.g., unified diff for edits/reads) */
+  detailedContent?: string;
 }
 
 export interface ModelUsageEntry {

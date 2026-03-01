@@ -227,6 +227,8 @@ contextBridge.exposeInMainWorld("claude", {
     delete: (id: string) => ipcRenderer.invoke("agents:delete", id),
     updateCachedConfig: (agentId: string, configOptions: unknown[]) =>
       ipcRenderer.invoke("agents:update-cached-config", agentId, configOptions),
+    checkBinaries: (agents: Array<{ id: string; binary: Record<string, { cmd: string; args?: string[] }> }>) =>
+      ipcRenderer.invoke("agents:check-binaries", agents),
   },
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),

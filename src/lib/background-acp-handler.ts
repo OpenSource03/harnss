@@ -95,7 +95,7 @@ export function handleACPEvent(state: InternalState, event: ACPSessionEvent): vo
           id: msgId,
           role: "tool_call",
           content: "",
-          toolName: deriveToolName(update.title, update.kind),
+          toolName: deriveToolName(update.title, update.kind, update.rawInput),
           toolInput: acpNormalizeToolInput(update.rawInput, update.kind, update.locations),
           ...(initialResult ? { toolResult: initialResult } : {}),
           ...(update.status === "failed" ? { toolError: true } : {}),

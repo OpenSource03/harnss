@@ -85,6 +85,19 @@ export function useACP({ sessionId, initialMessages, initialConfigOptions, initi
     scheduleRaf(flushStreamingToState);
   }, [scheduleRaf, flushStreamingToState]);
 
+  const pushSystemError = useCallback((content: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: nextAcpId("system-acp-error"),
+        role: "system",
+        content,
+        isError: true,
+        timestamp: Date.now(),
+      },
+    ]);
+  }, [setMessages]);
+
   const ensureStreamingMessage = useCallback(() => {
     if (buffer.current.messageId) return;
     const id = nextAcpId("stream");
@@ -154,7 +167,7 @@ export function useACP({ sessionId, initialMessages, initialConfigOptions, initi
       finalizeStreamingMessage();
       const tc = update as Extract<typeof update, { sessionUpdate: "tool_call" }>;
       const msgId = `tool-${tc.toolCallId}`;
-      const toolName = deriveToolName(tc.title, tc.kind);
+      const toolName = deriveToolName(tc.title, tc.kind, tc.rawInput);
       acpLog("TOOL_CALL", {
         toolCallId: tc.toolCallId?.slice(0, 12),
         title: tc.title,
@@ -327,16 +340,40 @@ export function useACP({ sessionId, initialMessages, initialConfigOptions, initi
       ...(displayText ? { displayContent: displayText } : {}),
     }]);
     setIsProcessing(true);
-    await window.claude.acp.prompt(sessionId, text, images);
-  }, [sessionId]);
+    try {
+      const result = await window.claude.acp.prompt(sessionId, text, images);
+      if (result?.error) {
+        acpLog("SEND_ERROR", { session: sessionId.slice(0, 8), error: result.error });
+        pushSystemError(`ACP prompt error: ${result.error}`);
+        setIsProcessing(false);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      acpLog("SEND_ERROR", { session: sessionId.slice(0, 8), error: msg });
+      pushSystemError(`ACP prompt error: ${msg}`);
+      setIsProcessing(false);
+    }
+  }, [sessionId, pushSystemError]);
 
   /** Send a message without adding it to chat (used for queued messages already in the UI) */
   const sendRaw = useCallback(async (text: string, images?: ImageAttachment[]) => {
     if (!sessionId) return;
     acpLog("SEND_RAW", { session: sessionId.slice(0, 8), textLen: text.length });
     setIsProcessing(true);
-    await window.claude.acp.prompt(sessionId, text, images);
-  }, [sessionId]);
+    try {
+      const result = await window.claude.acp.prompt(sessionId, text, images);
+      if (result?.error) {
+        acpLog("SEND_RAW_ERROR", { session: sessionId.slice(0, 8), error: result.error });
+        pushSystemError(`ACP prompt error: ${result.error}`);
+        setIsProcessing(false);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      acpLog("SEND_RAW_ERROR", { session: sessionId.slice(0, 8), error: msg });
+      pushSystemError(`ACP prompt error: ${msg}`);
+      setIsProcessing(false);
+    }
+  }, [sessionId, pushSystemError]);
 
   const stop = useCallback(async () => {
     if (!sessionId) return;
@@ -347,8 +384,22 @@ export function useACP({ sessionId, initialMessages, initialConfigOptions, initi
   const interrupt = useCallback(async () => {
     if (!sessionId) return;
     acpLog("INTERRUPT", { session: sessionId.slice(0, 8) });
-    await window.claude.acp.cancel(sessionId);
-  }, [sessionId]);
+    finalizeStreamingMessage();
+    closePendingTools();
+    setPendingPermission(null);
+    setIsProcessing(false);
+    try {
+      const result = await window.claude.acp.cancel(sessionId);
+      if (result?.error) {
+        acpLog("INTERRUPT_ERROR", { session: sessionId.slice(0, 8), error: result.error });
+        pushSystemError(`ACP cancel error: ${result.error}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      acpLog("INTERRUPT_ERROR", { session: sessionId.slice(0, 8), error: msg });
+      pushSystemError(`ACP cancel error: ${msg}`);
+    }
+  }, [sessionId, finalizeStreamingMessage, closePendingTools, pushSystemError]);
 
   const respondPermission = useCallback(async (
     behavior: AppPermissionBehavior,
