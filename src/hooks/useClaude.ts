@@ -3,7 +3,6 @@ import type {
   ClaudeEvent,
   SystemInitEvent,
   SystemCompactBoundaryEvent,
-  TaskStartedEvent,
   TaskProgressEvent,
   TaskNotificationEvent,
   AuthStatusEvent,
@@ -237,14 +236,12 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
       // Filter events by sessionId
       if (event._sessionId && event._sessionId !== sessionIdRef.current) return;
 
-      // Intercept task lifecycle events before parentId routing —
-      // these are top-level metadata for background agents, not subagent streaming content
+      // Intercept task progress/notification events before parentId routing —
+      // these are top-level metadata for background agents, not subagent streaming content.
+      // Note: task_started fires for ALL agents (foreground + background), so we don't
+      // register from it. Background agents are registered from the tool_result with isAsync.
       if (event.type === "system" && "subtype" in event) {
         const sub = (event as { subtype: string }).subtype;
-        if (sub === "task_started") {
-          bgAgentStore.handleTaskStarted(sessionIdRef.current!, event as TaskStartedEvent);
-          return;
-        }
         if (sub === "task_progress") {
           bgAgentStore.handleTaskProgress(sessionIdRef.current!, event as TaskProgressEvent);
           return;
@@ -370,7 +367,7 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
                   parsedInput = { raw: rawInput };
                 }
 
-                const isTask = toolMeta.name === "Task";
+                const isTask = toolMeta.name === "Task" || toolMeta.name === "Agent";
                 const msgId = `tool-${toolMeta.id}`;
 
                 setMessages((prev) => {
@@ -493,7 +490,7 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
 
           for (const block of event.message.content) {
             if (block.type === "tool_use") {
-              const isTask = block.name === "Task";
+              const isTask = block.name === "Task" || block.name === "Agent";
               const msgId = `tool-${block.id}`;
               setMessages((prev) => {
                 if (prev.some((m) => m.id === msgId)) return prev;
@@ -522,6 +519,12 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
         case "user": {
           const rawContent = event.message.content;
 
+          // Task completion arrives as user text with <task-notification> XML,
+          // not as a system event — parse it and update the bgAgentStore
+          if (typeof rawContent === "string" && rawContent.includes("<task-notification>")) {
+            bgAgentStore.handleUserMessage(sessionIdRef.current!, rawContent);
+          }
+
           // Tool result — update the matching tool_call message
           if (Array.isArray(rawContent) && rawContent[0]?.type === "tool_result") {
             const toolResult = rawContent[0];
@@ -537,10 +540,20 @@ export function useClaude({ sessionId, initialMessages, initialMeta, initialPerm
               isError,
             });
 
+            // Register background (async) agents in the shared store
+            if (resultMeta?.isAsync && resultMeta.outputFile && toolUseId) {
+              bgAgentStore.registerAsyncAgent(sessionIdRef.current!, {
+                toolUseId,
+                agentId: resultMeta.agentId ?? toolUseId,
+                description: String(resultMeta.description ?? "Background agent"),
+                outputFile: resultMeta.outputFile,
+              });
+            }
+
             setMessages((prev) =>
               prev.map((m) => {
                 if (m.id !== toolCallId) return m;
-                if (m.toolName === "Task" && resultMeta) {
+                if ((m.toolName === "Task" || m.toolName === "Agent") && resultMeta) {
                   return {
                     ...m,
                     toolResult: resultMeta,

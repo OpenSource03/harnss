@@ -2,7 +2,6 @@ import type {
   ClaudeEvent,
   StreamEvent,
   SystemInitEvent,
-  TaskStartedEvent,
   TaskProgressEvent,
   TaskNotificationEvent,
   AssistantMessageEvent,
@@ -107,13 +106,11 @@ export class BackgroundSessionStore {
     const sessionId = event._sessionId;
     if (!sessionId) return;
 
-    // Route task lifecycle events to the shared background agent store
+    // Route task progress/notification events to the shared background agent store.
+    // task_started is NOT handled — it fires for all agents, not just background.
+    // Background agents are registered from the tool_result with isAsync.
     if (event.type === "system" && "subtype" in event) {
       const sub = (event as { subtype: string }).subtype;
-      if (sub === "task_started") {
-        bgAgentStore.handleTaskStarted(sessionId, event as TaskStartedEvent);
-        return;
-      }
       if (sub === "task_progress") {
         bgAgentStore.handleTaskProgress(sessionId, event as TaskProgressEvent);
         return;
@@ -192,7 +189,7 @@ export class BackgroundSessionStore {
 
         for (const block of evt.message.content) {
           if (block.type === "tool_use") {
-            const isTask = block.name === "Task";
+            const isTask = block.name === "Task" || block.name === "Agent";
             const msgId = `tool-${block.id}`;
             if (!state.messages.some((m) => m.id === msgId)) {
               state.messages.push({
@@ -221,6 +218,12 @@ export class BackgroundSessionStore {
       case "user": {
         const evt = event as ToolResultEvent;
         const uc = evt.message.content;
+
+        // Task completion arrives as user text with <task-notification> XML
+        if (typeof uc === "string" && uc.includes("<task-notification>")) {
+          bgAgentStore.handleUserMessage(sessionId, uc);
+        }
+
         if (Array.isArray(uc) && uc[0]?.type === "tool_result") {
           const toolResult = uc[0];
           const toolUseId = toolResult.tool_use_id;
@@ -231,9 +234,19 @@ export class BackgroundSessionStore {
             toolResult.content,
           );
 
+          // Register background (async) agents in the shared store
+          if (resultMeta?.isAsync && resultMeta.outputFile && toolUseId) {
+            bgAgentStore.registerAsyncAgent(sessionId, {
+              toolUseId,
+              agentId: resultMeta.agentId ?? toolUseId,
+              description: String(resultMeta.description ?? "Background agent"),
+              outputFile: resultMeta.outputFile,
+            });
+          }
+
           state.messages = state.messages.map((m) => {
             if (m.id !== `tool-${toolUseId}`) return m;
-            if (m.toolName === "Task" && resultMeta) {
+            if ((m.toolName === "Task" || m.toolName === "Agent") && resultMeta) {
               return {
                 ...m,
                 toolResult: resultMeta,

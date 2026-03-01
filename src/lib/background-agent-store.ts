@@ -1,14 +1,24 @@
 import type { BackgroundAgent } from "@/types";
-import type { TaskStartedEvent, TaskProgressEvent, TaskNotificationEvent } from "@/types";
+import type { TaskProgressEvent, TaskNotificationEvent } from "@/types";
 
 type Listener = (sessionId: string) => void;
+
+interface AsyncAgentInfo {
+  toolUseId: string;
+  agentId: string;
+  description: string;
+  outputFile: string;
+}
 
 /**
  * Shared store for event-driven background agent tracking.
  *
- * Both useClaude (active session) and BackgroundSessionStore (backgrounded
- * sessions) push SDK task lifecycle events here. The useBackgroundAgents
- * hook subscribes via useSyncExternalStore.
+ * Only tracks BACKGROUND (async) agents — foreground agents use the
+ * existing parentToolMap/subagentSteps system in useClaude.
+ *
+ * Registration: from tool_result with isAsync: true (definitive async signal).
+ * Updates: from task_progress events (live metrics) and task-notification XML
+ * in user messages (completion).
  */
 class BackgroundAgentStore {
   private agents = new Map<string, Map<string, BackgroundAgent>>();
@@ -43,26 +53,29 @@ class BackgroundAgentStore {
     this.notify(sessionId);
   }
 
-  handleTaskStarted(sessionId: string, event: TaskStartedEvent): void {
-    if (!event.tool_use_id) return;
+  /**
+   * Register a background agent from tool_result with isAsync: true.
+   * This is the only entry point — task_started fires for ALL agents
+   * (foreground + background), so we don't use it.
+   */
+  registerAsyncAgent(sessionId: string, info: AsyncAgentInfo): void {
     let map = this.agents.get(sessionId);
     if (!map) {
       map = new Map();
       this.agents.set(sessionId, map);
     }
-    // Don't overwrite if already exists (e.g. duplicate event)
-    if (map.has(event.tool_use_id)) return;
+    if (map.has(info.toolUseId)) return;
 
-    map.set(event.tool_use_id, {
-      agentId: event.task_id,
-      description: event.description,
+    map.set(info.toolUseId, {
+      agentId: info.agentId,
+      description: info.description,
       prompt: "",
-      outputFile: "",
+      outputFile: info.outputFile,
       launchedAt: Date.now(),
       status: "running",
       activity: [],
-      toolUseId: event.tool_use_id,
-      taskId: event.task_id,
+      toolUseId: info.toolUseId,
+      taskId: info.agentId,
     });
     this.notify(sessionId);
   }
@@ -70,6 +83,7 @@ class BackgroundAgentStore {
   handleTaskProgress(sessionId: string, event: TaskProgressEvent): void {
     if (!event.tool_use_id) return;
     const agent = this.agents.get(sessionId)?.get(event.tool_use_id);
+    // Only update agents we've registered (i.e. background agents)
     if (!agent) return;
 
     agent.usage = {
@@ -109,6 +123,37 @@ class BackgroundAgentStore {
     this.notify(sessionId);
   }
 
+  /**
+   * Parse task completion from user text messages containing <task-notification> XML.
+   * The SDK delivers task completion as a user text message, NOT as a system event.
+   */
+  handleUserMessage(sessionId: string, content: string): void {
+    if (!content.includes("<task-notification>")) return;
+
+    const toolUseId = extractXmlTag(content, "tool-use-id");
+    if (!toolUseId) return;
+
+    const agent = this.agents.get(sessionId)?.get(toolUseId);
+    if (!agent) return;
+
+    const status = extractXmlTag(content, "status");
+    agent.status = status === "completed" ? "completed" : "error";
+    agent.result = extractXmlTag(content, "summary") || undefined;
+
+    const tokens = extractXmlTag(content, "total_tokens");
+    const tools = extractXmlTag(content, "tool_uses");
+    const duration = extractXmlTag(content, "duration_ms");
+    if (tokens) {
+      agent.usage = {
+        totalTokens: parseInt(tokens, 10) || 0,
+        toolUses: parseInt(tools ?? "0", 10) || 0,
+        durationMs: parseInt(duration ?? "0", 10) || 0,
+      };
+    }
+
+    this.notify(sessionId);
+  }
+
   dismissAgent(sessionId: string, agentId: string): void {
     const map = this.agents.get(sessionId);
     if (!map) return;
@@ -120,6 +165,13 @@ class BackgroundAgentStore {
     }
     this.notify(sessionId);
   }
+}
+
+/** Extract text content of an XML-like tag from a string. */
+function extractXmlTag(text: string, tag: string): string | null {
+  const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`);
+  const match = re.exec(text);
+  return match ? match[1].trim() : null;
 }
 
 export const bgAgentStore = new BackgroundAgentStore();

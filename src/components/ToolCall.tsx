@@ -168,7 +168,7 @@ function getToolLabel(toolName: string, type: ToolLabelType): string | null {
 // ── Main entry ──
 
 export const ToolCall = memo(function ToolCall({ message }: { message: UIMessage }) {
-  const isTask = message.toolName === "Task";
+  const isTask = message.toolName === "Task" || message.toolName === "Agent";
 
   return (
     <div className="flex justify-start px-4 py-0.5">

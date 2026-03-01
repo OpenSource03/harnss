@@ -52,6 +52,17 @@ function summarizeEvent(event: Record<string, unknown>): string {
       if (event.subtype === "init") {
         return `system/init session=${(event.session_id as string)?.slice(0, 8)} model=${event.model}`;
       }
+      if (event.subtype === "task_started") {
+        return `system/task_started task=${(event.task_id as string)?.slice(0, 8)} tool_use=${(event.tool_use_id as string)?.slice(0, 12)} desc="${event.description}"`;
+      }
+      if (event.subtype === "task_progress") {
+        const usage = event.usage as { total_tokens: number; tool_uses: number; duration_ms: number } | undefined;
+        return `system/task_progress task=${(event.task_id as string)?.slice(0, 8)} tokens=${usage?.total_tokens} tools=${usage?.tool_uses} ${usage?.duration_ms}ms last=${event.last_tool_name ?? "-"}`;
+      }
+      if (event.subtype === "task_notification") {
+        const usage = event.usage as { total_tokens: number; tool_uses: number; duration_ms: number } | undefined;
+        return `system/task_notification task=${(event.task_id as string)?.slice(0, 8)} status=${event.status} tokens=${usage?.total_tokens} ${usage?.duration_ms}ms`;
+      }
       return `system/${event.subtype}`;
     }
     case "stream_event": {

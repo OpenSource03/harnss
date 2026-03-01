@@ -133,10 +133,10 @@ function AgentItem({
 
         <CollapsibleContent>
           <div className="px-2 ps-9 pb-2 space-y-2">
-            {/* Activity log (last 15) */}
+            {/* Activity log — scrollable when long */}
             {agent.activity.length > 0 && (
-              <div className="space-y-0.5">
-                {agent.activity.slice(-15).map((activity, i) => (
+              <div className="max-h-48 overflow-y-auto space-y-0.5 scrollbar-none">
+                {agent.activity.map((activity, i) => (
                   <ActivityRow key={i} activity={activity} />
                 ))}
               </div>
