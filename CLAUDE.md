@@ -16,25 +16,41 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 - **Terminal**: node-pty (main process) + @xterm/xterm + @xterm/addon-fit (renderer)
 - **Browser**: Electron `<webview>` tag (requires `webviewTag: true` in webPreferences)
 - **Package manager**: pnpm
-- **Path alias**: `@/` → `./src/`
+- **Path aliases**: `@/` → `./src/`, `@shared/` → `./shared/`
 
 ## Project Structure
 
 ```
+shared/
+└── types/             # Types shared between electron and renderer processes
+    ├── codex-protocol/  # Auto-generated Codex protocol types (from codex app-server)
+    │   ├── v2/          # Modern v2 API types
+    │   └── serde_json/  # JSON value types
+    ├── codex.ts         # Codex type re-exports with Codex-prefixed aliases
+    ├── engine.ts        # EngineId, AppPermissionBehavior, SessionMeta, EngineHookState
+    ├── acp.ts           # ACP session update types
+    └── registry.ts      # Agent registry types
+
 electron/
 ├── dist/       # tsup build output (gitignored)
 └── src/
     ├── ipc/    # IPC handlers (claude-sessions, projects, sessions, settings, terminal, git, etc.)
-    └── lib/    # Main-process utilities (logger, async-channel, data-dir, app-settings, sdk, etc.)
+    └── lib/    # Main-process utilities (logger, async-channel, data-dir, app-settings, sdk, error-utils, etc.)
 
 src/
 ├── components/
-│   ├── settings/  # Settings sub-views (GeneralSettings, AgentSettings, etc.)
-│   └── ui/        # ShadCN base components (auto-generated)
-├── hooks/         # React hooks (useClaude, useSessionManager, useBackgroundAgents, etc.)
-├── lib/           # Renderer utilities (protocol helpers, streaming-buffer, background stores, etc.)
-└── types/         # TypeScript types (protocol, ui, window.d.ts)
-    └── codex-protocol/  # Codex protocol type definitions
+│   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
+│   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7)
+│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
+│   ├── sidebar/       # AppSidebar decomposed (ProjectSection, SessionItem, CCSessionList)
+│   ├── lib/           # Component-local utilities (tool-metadata, tool-formatting)
+│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect
+│   └── ui/            # ShadCN base components (auto-generated)
+├── hooks/
+│   ├── session/       # useSessionManager decomposed (lifecycle, persistence, draft, revival, queue)
+│   └── ...            # React hooks (useEngineBase, useClaude, useAppOrchestrator, usePanelResize, etc.)
+├── lib/               # Renderer utilities (protocol, streaming-buffer, message-factory, background stores, etc.)
+└── types/             # Renderer-side types (protocol, ui, window.d.ts) + re-export shims for shared/
 ```
 
 ## How to Run
@@ -121,13 +137,25 @@ Two tiers of settings storage, each suited to different access patterns:
 
 ### State Architecture
 
-- `useSessionManager` — top-level orchestrator: session list, create/switch/delete, auto-save, background store coordination
-- `useClaude({ sessionId })` — per-session event handling, streaming buffer, subagent routing, permission state
+**Hook composition** — large hooks are decomposed into focused sub-hooks:
+
+- `useAppOrchestrator` — wires together all top-level state (session manager, project manager, space manager, settings, agents, notifications) and provides ~30 callbacks to `AppLayout`
+- `useSessionManager` — slim orchestrator (~400 lines) composing 5 sub-hooks:
+  - `useSessionLifecycle` — session CRUD (create, switch, delete, rename, deselect)
+  - `useSessionPersistence` — auto-save with debounce, background store seeding/consuming
+  - `useDraftMaterialization` — draft-to-live session transitions for all 3 engines
+  - `useSessionRevival` — per-engine revival (reconnecting to existing sessions)
+  - `useMessageQueue` — message queuing and drain for not-yet-ready sessions
+- `useEngineBase` — shared foundation for all engine hooks (state, rAF flush, reset effect)
+- `useClaude` / `useACP` / `useCodex` — engine-specific event handling built on `useEngineBase`
+- `useSpaceTheme` — space color tinting via CSS custom properties
+- `usePanelResize` — all resize handle logic (right panel, tools panel, splits)
+- `useStreamingTextReveal` — per-token fade-in animation via DOM text node splitting
 - `useProjectManager` — project CRUD via IPC
 - `useBackgroundAgents` — polls async Task agent output files every 3s, marks complete after 2 stable polls
 - `useSidebar` — sidebar open/close with localStorage persistence
 
-**BackgroundSessionStore** — accumulates events for non-active sessions to prevent state loss when switching. On switch-away, session state is captured into the store; on switch-back, state is consumed from the store (or loaded from disk if no live process).
+**BackgroundSessionStore** — accumulates events for non-active sessions to prevent state loss when switching. On switch-away, session state is captured into the store; on switch-back, state is consumed from the store (or loaded from disk if no live process). Event handling is split into per-engine handler modules (`background-claude-handler.ts`, `background-acp-handler.ts`, `background-codex-handler.ts`).
 
 ### Claude CLI Stream-JSON Protocol
 
@@ -187,19 +215,24 @@ Tool name normalization: `extractMcpToolName(toolName)` strips the `"mcp__Server
 - Atlassian wraps Jira responses in `{ issues: { totalCount, nodes: [...] } }` — use `unwrapJiraIssues()` to normalize
 
 **Adding a new MCP tool renderer**:
-1. Create a component in `McpToolContent.tsx` that accepts `{ data: unknown }`
-2. Register in `MCP_RENDERERS` (exact name) and/or `MCP_RENDERER_PATTERNS` (regex with `[/_]+`)
+1. Create a component in `src/components/mcp-renderers/` that accepts `{ data: unknown }`
+2. Register in `MCP_RENDERERS` (exact name) and/or `MCP_RENDERER_PATTERNS` (regex with `[/_]+`) in `McpToolContent.tsx`
 3. Also add to `getMcpCompactSummary()` for collapsed tool card summaries
 
 **Tool naming conventions**:
 - SDK engine: `mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql`
 - ACP engine: `Tool: Atlassian/searchJiraIssuesUsingJql`
 - All regex patterns use `Atlassian[/_]+` to match both
-- `ToolCall.tsx` label logic (`getMcpToolLabel`, `formatCompactSummary`, `MCP_TOOL_LABELS`) handles both prefixes
+- Label/formatting logic in `src/components/lib/tool-metadata.ts` (`getMcpToolLabel`, `MCP_TOOL_LABELS`) handles both prefixes
+- Compact summaries in `src/components/lib/tool-formatting.ts` (`formatCompactSummary`)
 
 **Text-based tools**: Some MCP tools (e.g., Context7) return plain text/markdown instead of JSON. `extractMcpText()` extracts the raw text, passed to renderers as `rawText` prop alongside `data` (which will be `null` for non-JSON responses). Text-based renderers should parse the `rawText` string themselves.
 
-**Existing renderers**: `JiraIssueList` (search), `JiraIssueDetail` (getJiraIssue/fetch), `ConfluencePageDetail`, `RovoSearchResults`, `AtlassianResourcesList` (getAccessibleAtlassianResources), `Context7LibraryList` (resolve-library-id), `Context7DocsResult` (query-docs)
+**Existing renderers** (in `src/components/mcp-renderers/`):
+- `jira.tsx` — `JiraIssueList` (search), `JiraIssueDetail` (getJiraIssue/fetch), `JiraProjectList`, `JiraTransitions`
+- `confluence.tsx` — `ConfluenceSearchResults`, `ConfluenceSpaces`
+- `atlassian.tsx` — `RovoSearchResults`, `RovoFetchResult`, `AtlassianResourcesList`
+- `context7.tsx` — `Context7LibraryList` (resolve-library-id), `Context7DocsResult` (query-docs)
 
 ## Reference Documentation
 
@@ -237,13 +270,54 @@ Always search the web when needed for up-to-date API references, Electron APIs, 
 4. Tag: `git tag vX.Y.Z HEAD && git push origin vX.Y.Z`
 5. Create release: `gh release create vX.Y.Z --title "..." --notes "..."`
 
+## Shared Types Architecture
+
+Types shared between electron and renderer live in `shared/types/`. Both tsconfigs include this directory via `@shared/*` path alias.
+
+- **`shared/types/codex-protocol/`** — auto-generated from `codex app-server generate-ts`. Contains v1, v2, and serde_json type families. Used by both electron Codex handlers and renderer hooks.
+- **`shared/types/codex.ts`** — re-exports with `Codex`-prefixed aliases (e.g., `CodexThreadItem`, `CodexSessionEvent`) plus Harnss-specific wrappers (`CodexApprovalRequest`, `CodexRequestUserInputRequest`).
+- **`shared/types/engine.ts`** — `EngineId`, `AppPermissionBehavior`, `SessionMeta`, `EngineHookState`, `RespondPermissionFn`. Imports UI types from `../../src/types/ui`.
+- **`shared/types/acp.ts`** — ACP session update discriminated union types.
+- **`shared/types/registry.ts`** — agent registry types (`RegistryAgent`, `RegistryData`).
+
+**Backward compatibility**: `src/types/` contains re-export shims (`export * from "../../shared/types/..."`) so existing `@/types/*` imports continue to work. New code can use either `@/types/` or `@shared/types/`.
+
+**Key type naming**:
+- `InstalledAgent` (was `AgentDefinition` — renamed to avoid SDK clash)
+- `AppPermissionBehavior` (was `PermissionBehavior` — renamed to avoid SDK clash)
+- `SessionBase` — shared base for `ChatSession` and `PersistedSession`
+- `SessionMeta` — `{ isProcessing, isConnected, sessionInfo, totalCost }` snapshot for background store
+
+**Electron SDK types**: `electron/src/lib/sdk.ts` imports `Query` and `query` types directly from `@anthropic-ai/claude-agent-sdk` (no more manual type definitions or double-casts). ACP connection is typed as `ClientSideConnection` from `@agentclientprotocol/sdk`.
+
+### Shared Utilities
+
+- **`src/lib/message-factory.ts`** — `createSystemMessage()`, `createUserMessage()`, `formatResultError()` — replaces 20+ inline UIMessage constructions
+- **`src/lib/streaming-buffer.ts`** — `StreamingBuffer` (Claude) + `SimpleStreamingBuffer` (ACP/Codex, merged from two identical copies)
+- **`src/lib/file-access.ts`** — pure data transformation for file access tracking (extracted from FilesPanel)
+- **`src/lib/mcp-utils.ts`** — `toMcpStatusState()` (moved from types/ui.ts)
+- **`src/lib/acp-utils.ts`** — `flattenConfigOptions()` (moved from types/acp.ts)
+- **`electron/src/lib/error-utils.ts`** — `extractErrorMessage()` (replaces 3 duplicated implementations)
+
+### Electron Session Handler Patterns
+
+The three session IPC handlers share extracted utilities:
+- **`createAcpConnection()`** — factory for ACP process spawn + ClientSideConnection setup (eliminates duplication between `acp:start` and `acp:revive-session`)
+- **`setupCodexHandlers()`** — wires RPC handlers for Codex sessions (shared between `codex:start` and `codex:resume`)
+- **`startEventLoop()`** — iterates SDK QueryHandle async generator with event forwarding (shared between `claude:start` and `restartSession`)
+- **`oneShotSdkQuery()`** — fire-and-forget SDK query with timeout (shared between title gen and commit message gen)
+
 ## Coding Conventions
 
 - **Tailwind v4** — no CSS resets, Preflight handles normalization
 - **ShadCN UI** — use `@/components/ui/*` for base components
-- **Path aliases** — always use `@/` imports in src/ files
+- **Path aliases** — `@/` for renderer src/, `@shared/` for shared types
 - **Logical margins** — use `ms-*`/`me-*` instead of `ml-*`/`mr-*`
 - **Text overflow** — use `wrap-break-word` on containers with user content
 - **No `any`** — use proper types, never `as any`
+- **No unsafe `as` casts** — use discriminated unions and type guards instead of `as Record<string, unknown>`
 - **pnpm** — always use pnpm for package management
 - **Memo optimization** — components use `React.memo` with custom comparators for performance
+- **Component decomposition** — large components are split into focused sub-components in subdirectories (git/, tool-renderers/, mcp-renderers/, sidebar/)
+- **Hook decomposition** — large hooks are split into focused sub-hooks (session/, useEngineBase)
+- **Shared components** — reusable UI patterns extracted to shared components (`TabBar`, `PanelHeader`, `SettingRow`)
