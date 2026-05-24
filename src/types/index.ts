@@ -98,6 +98,7 @@ export type {
   PreferredEditor,
   VoiceDictationMode,
   ThemeOption,
+  AppLanguage,
   MacBackgroundEffect,
   CodexBinarySource,
   ClaudeBinarySource,

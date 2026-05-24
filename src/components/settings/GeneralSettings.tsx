@@ -1,13 +1,15 @@
 import { memo, useState, useCallback, useEffect } from "react";
-import { Download, MessageSquare, Code, Mic } from "lucide-react";
+import { Download, MessageSquare, Code, Mic, Languages } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SettingRow, SettingsSelect, SettingsHeader, SettingsSection } from "@/components/settings/shared";
-import type { AppSettings, PreferredEditor, VoiceDictationMode } from "@/types";
+import { DEFAULT_LANGUAGE, t } from "@/lib/i18n";
+import type { AppLanguage, AppSettings, PreferredEditor, VoiceDictationMode } from "@/types";
 
 interface GeneralSettingsProps {
   appSettings: AppSettings | null;
   onUpdateAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
+  language?: AppLanguage;
 }
 
 // ── Component ──
@@ -15,12 +17,14 @@ interface GeneralSettingsProps {
 export const GeneralSettings = memo(function GeneralSettings({
   appSettings,
   onUpdateAppSettings,
+  language = DEFAULT_LANGUAGE,
 }: GeneralSettingsProps) {
   // Local optimistic state — synced from props once loaded
   const [allowPrerelease, setAllowPrerelease] = useState(false);
   const [chatLimit, setChatLimit] = useState(10);
   const [preferredEditor, setPreferredEditor] = useState<PreferredEditor>("auto");
   const [voiceDictation, setVoiceDictation] = useState<VoiceDictationMode>("native");
+  const [selectedLanguage, setSelectedLanguage] = useState<AppLanguage>(language);
 
   useEffect(() => {
     if (appSettings) {
@@ -28,6 +32,7 @@ export const GeneralSettings = memo(function GeneralSettings({
       setChatLimit(appSettings.defaultChatLimit || 10);
       setPreferredEditor(appSettings.preferredEditor || "auto");
       setVoiceDictation(appSettings.voiceDictation || "native");
+      setSelectedLanguage(appSettings.language || DEFAULT_LANGUAGE);
     }
   }, [appSettings]);
 
@@ -64,17 +69,41 @@ export const GeneralSettings = memo(function GeneralSettings({
     [onUpdateAppSettings],
   );
 
+  const handleLanguageChange = useCallback(
+    async (value: AppLanguage) => {
+      setSelectedLanguage(value);
+      await onUpdateAppSettings({ language: value });
+    },
+    [onUpdateAppSettings],
+  );
+
   return (
     <div className="flex h-full flex-col">
-      <SettingsHeader title="General" description="Application-wide preferences" />
+      <SettingsHeader title={t(language, "settings.general.title")} description={t(language, "settings.general.description")} />
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="px-6 py-2">
-          {/* ── Updates section ── */}
-          <SettingsSection icon={Download} label="Updates" first>
+          <SettingsSection icon={Languages} label={t(language, "settings.general.language.section")} first>
             <SettingRow
-              label="Include pre-release updates"
-              description="Receive beta versions with the latest features. Disable to only get stable releases."
+              label={t(language, "settings.general.language.label")}
+              description={t(language, "settings.general.language.description")}
+            >
+              <SettingsSelect
+                value={selectedLanguage}
+                onValueChange={handleLanguageChange}
+                options={[
+                  { value: "en", label: t(language, "settings.general.language.english") },
+                  { value: "zh-CN", label: t(language, "settings.general.language.chinese") },
+                ]}
+              />
+            </SettingRow>
+          </SettingsSection>
+
+          {/* ── Updates section ── */}
+          <SettingsSection icon={Download} label={t(language, "settings.general.updates.section")}>
+            <SettingRow
+              label={t(language, "settings.general.updates.prerelease.label")}
+              description={t(language, "settings.general.updates.prerelease.description")}
             >
               <Switch
                 checked={allowPrerelease}
@@ -84,10 +113,10 @@ export const GeneralSettings = memo(function GeneralSettings({
           </SettingsSection>
 
           {/* ── Sidebar section ── */}
-          <SettingsSection icon={MessageSquare} label="Sidebar">
+          <SettingsSection icon={MessageSquare} label={t(language, "settings.general.sidebar.section")}>
             <SettingRow
-              label="Recent chats per project"
-              description="Number of chats shown by default in each project. Click 'Show more' in the sidebar to load additional chats."
+              label={t(language, "settings.general.sidebar.chatLimit.label")}
+              description={t(language, "settings.general.sidebar.chatLimit.description")}
             >
               <SettingsSelect
                 value={String(chatLimit)}
@@ -98,16 +127,16 @@ export const GeneralSettings = memo(function GeneralSettings({
           </SettingsSection>
 
           {/* ── Editor section ── */}
-          <SettingsSection icon={Code} label="Editor">
+          <SettingsSection icon={Code} label={t(language, "settings.general.editor.section")}>
             <SettingRow
-              label="Default editor"
-              description="Choose which editor opens when you click 'Open in Editor'. Auto tries Cursor, VS Code, then Zed."
+              label={t(language, "settings.general.editor.default.label")}
+              description={t(language, "settings.general.editor.default.description")}
             >
               <SettingsSelect
                 value={preferredEditor}
                 onValueChange={handleEditorChange}
                 options={[
-                  { value: "auto", label: "Auto" },
+                  { value: "auto", label: t(language, "settings.general.editor.auto") },
                   { value: "cursor", label: "Cursor" },
                   { value: "code", label: "VS Code" },
                   { value: "zed", label: "Zed" },
@@ -117,17 +146,17 @@ export const GeneralSettings = memo(function GeneralSettings({
           </SettingsSection>
 
           {/* ── Voice Dictation section ── */}
-          <SettingsSection icon={Mic} label="Voice Dictation">
+          <SettingsSection icon={Mic} label={t(language, "settings.general.voice.section")}>
             <SettingRow
-              label="Dictation mode"
-              description="Native uses your OS dictation (macOS only). Whisper runs a local AI model for speech-to-text on all platforms (~40 MB download on first use)."
+              label={t(language, "settings.general.voice.mode.label")}
+              description={t(language, "settings.general.voice.mode.description")}
             >
               <SettingsSelect
                 value={voiceDictation}
                 onValueChange={handleVoiceDictationChange}
                 options={[
-                  { value: "native", label: "Native (OS)" },
-                  { value: "whisper", label: "Whisper (Local AI)" },
+                  { value: "native", label: t(language, "settings.general.voice.native") },
+                  { value: "whisper", label: t(language, "settings.general.voice.whisper") },
                 ]}
               />
             </SettingRow>

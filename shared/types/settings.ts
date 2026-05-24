@@ -9,6 +9,7 @@
 export type PreferredEditor = "auto" | "cursor" | "code" | "zed";
 export type VoiceDictationMode = "native" | "whisper";
 export type ThemeOption = "light" | "dark" | "system";
+export type AppLanguage = "en" | "zh-CN";
 export type MacBackgroundEffect = "liquid-glass" | "vibrancy" | "off";
 export type CodexBinarySource = "auto" | "managed" | "custom";
 export type ClaudeBinarySource = "auto" | "managed" | "custom";
@@ -41,6 +42,8 @@ export interface AppSettings {
   preferredEditor: PreferredEditor;
   /** Voice dictation mode: "native" uses OS dictation, "whisper" uses local AI model (default: "native") */
   voiceDictation: VoiceDictationMode;
+  /** UI language (default: "en") */
+  language: AppLanguage;
   /** Per-event notification and sound configuration */
   notifications: NotificationSettings;
   /** Custom client name sent to Codex servers during handshake (default: "Harnss") */

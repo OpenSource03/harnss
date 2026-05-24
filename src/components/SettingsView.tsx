@@ -27,6 +27,7 @@ import { AboutSettings } from "@/components/settings/AboutSettings";
 import { AnalyticsSettings } from "@/components/settings/AnalyticsSettings";
 import { useSettingsStore } from "@/stores/settings-store";
 import { isMac } from "@/lib/utils";
+import { DEFAULT_LANGUAGE, t, type TranslationKey } from "@/lib/i18n";
 import type { AppSettings } from "@/types";
 import { useAgentContext } from "./AgentContext";
 
@@ -36,24 +37,24 @@ export type SettingsSection = "general" | "appearance" | "notifications" | "anal
 
 interface NavItem {
   id: SettingsSection;
-  label: string;
+  label: TranslationKey;
   icon: LucideIcon;
   /** Renders a subtle "soon" indicator next to the label */
   comingSoon?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { id: "general", label: "General", icon: SlidersHorizontal },
-  { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "analytics", label: "Analytics", icon: BarChart3 },
-  { id: "agents", label: "ACP Agents", icon: Bot },
-  { id: "mcp", label: "MCP Servers", icon: Plug },
-  { id: "engines", label: "Engines", icon: Cpu },
-  { id: "skills", label: "Skills", icon: Sparkles, comingSoon: true },
-  { id: "custom-agents", label: "Agents", icon: Users, comingSoon: true },
-  { id: "advanced", label: "Advanced", icon: Wrench },
-  { id: "about", label: "About", icon: Info },
+  { id: "general", label: "settings.nav.general", icon: SlidersHorizontal },
+  { id: "appearance", label: "settings.nav.appearance", icon: Palette },
+  { id: "notifications", label: "settings.nav.notifications", icon: Bell },
+  { id: "analytics", label: "settings.nav.analytics", icon: BarChart3 },
+  { id: "agents", label: "settings.nav.acpAgents", icon: Bot },
+  { id: "mcp", label: "settings.nav.mcpServers", icon: Plug },
+  { id: "engines", label: "settings.nav.engines", icon: Cpu },
+  { id: "skills", label: "settings.nav.skills", icon: Sparkles, comingSoon: true },
+  { id: "custom-agents", label: "settings.nav.customAgents", icon: Users, comingSoon: true },
+  { id: "advanced", label: "settings.nav.advanced", icon: Wrench },
+  { id: "about", label: "settings.nav.about", icon: Info },
 ];
 
 // ── Props ──
@@ -88,6 +89,7 @@ export const SettingsView = memo(function SettingsView({
 
   // ── Main-process app settings (loaded once, updated optimistically) ──
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const language = appSettings?.language ?? DEFAULT_LANGUAGE;
 
   useEffect(() => {
     window.claude.settings.get().then((s: AppSettings | null) => {
@@ -117,6 +119,7 @@ export const SettingsView = memo(function SettingsView({
           <GeneralSettings
             appSettings={appSettings}
             onUpdateAppSettings={updateAppSettings}
+            language={language}
           />
         );
       case "appearance":
@@ -169,7 +172,7 @@ export const SettingsView = memo(function SettingsView({
         return (
           <PlaceholderSection
             title="Skills"
-            description="Create, install, and manage agent skills that extend what your AI coding agents can do."
+            description={t(language, "settings.placeholder.skills.description")}
             icon={Sparkles}
             comingSoon
           />
@@ -178,7 +181,7 @@ export const SettingsView = memo(function SettingsView({
         return (
           <PlaceholderSection
             title="Agents"
-            description="Build and configure custom agents with specialized tools, prompts, and workflows."
+            description={t(language, "settings.placeholder.customAgents.description")}
             icon={Users}
             comingSoon
           />
@@ -188,7 +191,7 @@ export const SettingsView = memo(function SettingsView({
       default:
         return null;
     }
-  }, [activeSection, appSettings, updateAppSettings, agents, saveAgent, deleteAgent, glassSupported, macLiquidGlassSupported, onReplayWelcome]);
+  }, [activeSection, appSettings, updateAppSettings, language, agents, saveAgent, deleteAgent, glassSupported, macLiquidGlassSupported, onReplayWelcome]);
 
   return (
     <div className={`island flex flex-1 flex-col overflow-hidden bg-background ${islandLayout ? "rounded-[var(--island-radius)]" : "rounded-none"}`}>
@@ -209,7 +212,7 @@ export const SettingsView = memo(function SettingsView({
             <PanelLeft className="h-4 w-4" />
           </Button>
         )}
-        <span className={`leading-none text-sm font-semibold text-foreground ${macIslandTitlebarOffsetClass}`}>Settings</span>
+        <span className={`leading-none text-sm font-semibold text-foreground ${macIslandTitlebarOffsetClass}`}>{t(language, "settings.title")}</span>
       </div>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -231,10 +234,10 @@ export const SettingsView = memo(function SettingsView({
                   }`}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
-                  <span className="flex-1">{item.label}</span>
+                  <span className="flex-1">{t(language, item.label)}</span>
                   {item.comingSoon && (
                     <span className="rounded bg-foreground/[0.06] px-1.5 py-px text-[10px] font-medium text-muted-foreground/70">
-                      Soon
+                      {t(language, "settings.nav.soon")}
                     </span>
                   )}
                 </button>
