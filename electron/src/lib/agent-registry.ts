@@ -28,11 +28,23 @@ const BUILTIN_CODEX: InstalledAgent = {
   icon: "zap",
 };
 
-const BUILTIN_IDS = new Set([BUILTIN_CLAUDE.id, BUILTIN_CODEX.id]);
+const BUILTIN_HERMES: InstalledAgent = {
+  id: "hermes",
+  name: "Hermes Agent",
+  engine: "acp",
+  binary: "hermes",
+  args: ["acp"],
+  builtIn: true,
+  icon: "sparkles",
+  description: "Run Hermes Agent through its ACP editor integration.",
+};
+
+const BUILTIN_IDS = new Set([BUILTIN_CLAUDE.id, BUILTIN_CODEX.id, BUILTIN_HERMES.id]);
 
 const agents = new Map<string, InstalledAgent>();
 agents.set(BUILTIN_CLAUDE.id, BUILTIN_CLAUDE);
 agents.set(BUILTIN_CODEX.id, BUILTIN_CODEX);
+agents.set(BUILTIN_HERMES.id, BUILTIN_HERMES);
 
 function getConfigPath(): string {
   return path.join(app.getPath("userData"), "openacpui-data", "agents.json");
