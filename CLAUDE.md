@@ -613,6 +613,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitTopRowItem.tsx` — renders a single item (chat pane or tool column) in the top row; extracted from AppLayout
+- `SplitBottomToolIsland.tsx` — renders a single tool island in the split-view bottom dock; extracted from AppLayout
+- `SplitPaneToolStrip.tsx` — per-pane tool picker strip (mirrors the single-pane ToolPicker strip)
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
