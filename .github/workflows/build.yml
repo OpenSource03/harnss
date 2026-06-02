@@ -76,10 +76,60 @@ jobs:
       - name: Build app
         run: pnpm build
 
+      - name: Verify mac signing secrets
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          missing=()
+
+          if [[ -z "${MAC_CSC_LINK}" ]]; then
+            missing+=("MAC_CSC_LINK")
+          fi
+          if [[ -z "${MAC_CSC_KEY_PASSWORD}" ]]; then
+            missing+=("MAC_CSC_KEY_PASSWORD")
+          fi
+
+          has_apple_id_credentials=false
+          if [[ -n "${APPLE_ID}" && -n "${APPLE_APP_SPECIFIC_PASSWORD}" && -n "${APPLE_TEAM_ID}" ]]; then
+            has_apple_id_credentials=true
+          fi
+
+          has_api_key_credentials=false
+          if [[ -n "${APPLE_API_KEY}" && -n "${APPLE_API_KEY_ID}" && -n "${APPLE_API_ISSUER}" ]]; then
+            has_api_key_credentials=true
+          fi
+
+          if [[ "${has_apple_id_credentials}" != "true" && "${has_api_key_credentials}" != "true" ]]; then
+            missing+=("APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID or APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER")
+          fi
+
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            printf 'Missing macOS release signing/notarization secret(s):\n'
+            printf ' - %s\n' "${missing[@]}"
+            exit 1
+          fi
+
       - name: Package (mac arm64 + x64)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          DEBUG: electron-notarize*
         run: >
           pnpm exec electron-builder
           --mac
