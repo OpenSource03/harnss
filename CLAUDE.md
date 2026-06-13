@@ -19,7 +19,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 - **Browser**: Electron `<webview>` tag (requires `webviewTag: true` in webPreferences)
 - **Virtualization**: @tanstack/react-virtual (chat message windowing)
 - **State management**: zustand (settings store, localStorage wrapper)
-- **Animation**: motion (v12, formerly framer-motion)
+- **Animation**: motion (v12, formerly framer-motion) + tw-animate-css (CSS keyframe animation utilities)
 - **Canvas/Annotations**: react-konva + konva (image annotation editor)
 - **Diagrams**: mermaid (MermaidDiagram.tsx)
 - **Code editor**: @monaco-editor/react (Monaco VS Code editor integration)
@@ -613,6 +613,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitTopRowItem.tsx` — renders a single item (chat pane or tool column) in the split-view top row; extracted from the `renderSplitTopRowItem` callback in AppLayout
+- `SplitBottomToolIsland.tsx` — renders a single tool island in the split-view bottom dock; shares `ToolIslandContent` with top-row tool columns
+- `SplitPaneToolStrip.tsx` — per-pane tool toggle strip (mirrors the main ToolPicker for split view)
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
