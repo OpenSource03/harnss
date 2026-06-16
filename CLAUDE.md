@@ -597,7 +597,7 @@ Each Space can have a custom color and icon. `SpaceCustomizer.tsx` provides the 
 ### Grabbed DOM Elements
 
 The Browser Panel supports a "grab element" feature that attaches DOM elements from the webview as context for the next message:
-- `GrabbedElement` type (`src/types/attachments.ts`) — `{ id, tag, text, html, timestamp }`
+- `GrabbedElement` type (`src/types/attachments.ts`) — `{ id, url, tag, selector, classes, attributes, textContent, outerHTML, computedStyles, boundingRect }`
 - `onElementGrab` callback on `PaneController` receives grabbed elements from the browser
 - `AttachmentPreview` (`src/components/input-bar/AttachmentPreview.tsx`) renders both image attachment thumbnails and grabbed element context chips above the input toolbar
 - `src/lib/element-inspector.ts` — injectable IIFE injected into the `<webview>` that intercepts clicks and sends the selected element's data back to the renderer via `ipcRenderer.sendToHost`
@@ -692,7 +692,7 @@ Types shared between electron and renderer live in `shared/types/`. Both tsconfi
 - `SessionBase` — shared base for `ChatSession` and `PersistedSession`
 - `BackgroundSessionSnapshot` — `{ isProcessing, isConnected, isCompacting, sessionInfo, totalCost, contextUsage }` snapshot for background store
 - `ContextUsage` (`src/types/mcp.ts`) — `{ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, contextWindow }` — context window consumption tracked per session
-- `GrabbedElement` (`src/types/attachments.ts`) — `{ id, tag, text, html, timestamp }` — DOM element captured from the Browser Panel for use as session context
+- `GrabbedElement` (`src/types/attachments.ts`) — `{ id, url, tag, selector, classes, attributes, textContent, outerHTML, computedStyles, boundingRect }` — DOM element captured from the Browser Panel for use as session context
 
 **Electron SDK types**: `electron/src/lib/sdk.ts` imports `Query` and `query` types directly from `@anthropic-ai/claude-agent-sdk` (no more manual type definitions or double-casts). ACP connection is typed as `ClientSideConnection` from `@agentclientprotocol/sdk`.
 
