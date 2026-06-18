@@ -430,7 +430,7 @@ Three tiers of settings storage, each suited to different access patterns:
 - `useContextMenuPosition` — shared positioning logic for right-click and button-triggered context menus (open state, align, coordinates)
 - `useInlineRename` — controlled edit state for inline rename inputs (isEditing, editName, handlers)
 
-**BackgroundSessionStore** — accumulates events for non-active sessions to prevent state loss when switching. On switch-away, session state is captured into the store; on switch-back, state is consumed from the store (or loaded from disk if no live process). Event handling is split into per-engine handler modules (`background-claude-handler.ts`, `background-acp-handler.ts`, `background-codex-handler.ts`). `InternalState` also tracks `contextUsage`, `isCompacting`, `codexPlanText`/`codexPlanTurnCounter` (Codex plan mode output), `activeTask`, `slashCommands`, and `pendingPermission`/`rawAcpPermission` for per-engine permission bridging.
+**BackgroundSessionStore** — accumulates events for non-active sessions to prevent state loss when switching. On switch-away, session state is captured into the store; on switch-back, state is consumed from the store (or loaded from disk if no live process). Event handling is split into per-engine handler modules (`src/lib/background/claude-handler.ts`, `acp-handler.ts`, `codex-handler.ts`). `InternalState` also tracks `contextUsage`, `isCompacting`, `codexPlanText`/`codexPlanTurnCounter` (Codex plan mode output), `activeTask`, `slashCommands`, and `pendingPermission`/`rawAcpPermission` for per-engine permission bridging.
 
 ### Claude CLI Stream-JSON Protocol
 
@@ -613,6 +613,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitBottomToolIsland.tsx` — bottom tool island rendered inside a split pane
+- `SplitPaneToolStrip.tsx` — vertical tool strip for a split pane
+- `SplitTopRowItem.tsx` — top-row tab/item within a split pane header
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
