@@ -81,7 +81,8 @@ src/
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
-│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
+│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, WriteContent, ReadContent,
+│   │                  #   TaskTool, WebSearchContent, WebFetchContent, PlanContent, SkillContent, etc.)
 │   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
@@ -197,7 +198,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `claude:models-cache:revalidate(options?)` → forces a model cache refresh
 - `claude:version` → returns the Claude CLI version string
 - `claude:binary-status` → returns binary detection status (found path or error)
-- `claude:restart-session` → restarts a stopped/crashed session
+- `claude:restart-session` → restarts a stopped/crashed session (accepts optional `effort` and `model` overrides)
 - `claude:generate-title(message, cwd?)` → one-shot Haiku query for chat title
 - Events sent to renderer via `claude:event` tagged with `_sessionId`
 - Permission requests sent via `claude:permission_request` with requestId
@@ -221,7 +222,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 **IPC API — Codex Sessions:**
 
 - `codex:start` → spawns Codex process + RPC channel, returns `{ sessionId }`
-- `codex:send` → sends a user message to the active Codex session
+- `codex:send` → sends a user message to the active Codex session (accepts optional `effort: string` and `collaborationMode` params per-turn)
 - `codex:stop(sessionId)` → terminates the Codex process
 - `codex:interrupt(sessionId)` → interrupts the current Codex turn
 - `codex:compact(sessionId)` → triggers context compaction for a Codex session
@@ -460,7 +461,7 @@ Key event types in order:
 
 **Chat UI state persistence**: The virtualized list unmounts rows that scroll out of view. To preserve per-message UI state (e.g. collapsed/expanded tool calls, copy button hover states), `ChatUiStateProvider` (`src/components/chat-ui-state.tsx`) + `useChatPersistedState` store these flags in a `Map` outside the row component tree. Rows read and write to this map via the context hook rather than local state.
 
-**Pane controller pattern**: `usePaneController` (`src/hooks/usePaneController.ts`) builds a `PaneController` object (defined in `src/types/pane-controller.ts`) containing all per-pane callbacks — send, stop, interrupt, set-model, set-permission-mode, onElementGrab. Both the single-pane layout and each `SplitChatPane` receive a `PaneController`, enabling full parity without prop drilling or conditional logic.
+**Pane controller pattern**: `usePaneController` (`src/hooks/usePaneController.ts`) builds a `PaneController` object (defined in `src/types/pane-controller.ts`) containing all per-pane callbacks — send, stop, interrupt, set-model, set-permission-mode, effort level changes (`handlePaneClaudeModelEffortChange`, `handlePaneCodexEffortChange`), and onElementGrab. Both the single-pane layout and each `SplitChatPane` receive a `PaneController`, enabling full parity without prop drilling or conditional logic. The `paneClaudeEffort: ClaudeEffort` and `paneCodexEffort: string` fields carry current effort state to the engine picker.
 
 **Codex plan mode**: Codex sessions support a `planMode` flag that restricts the agent to planning/read-only operations before execution. `planMode: boolean` is a setting in `useSettings`. `codexPlanModeEnabled` is derived in `useSessionManager` from either the active `startOptions.planMode` (for draft sessions) or the persisted `session.planMode` (for live sessions). `getSyncedPlanMode(sessionPlanMode, livePermissionMode)` in `useAppOrchestrator` reconciles the session flag with the live permission mode string — the live mode takes priority when present. Plan text output streams into `codexPlanText` in `InternalState`.
 
@@ -689,6 +690,7 @@ Types shared between electron and renderer live in `shared/types/`. Both tsconfi
 **Key type naming**:
 - `InstalledAgent` (was `AgentDefinition` — renamed to avoid SDK clash)
 - `AppPermissionBehavior` (was `PermissionBehavior` — renamed to avoid SDK clash)
+- `ClaudeEffort` (`src/types/session.ts`) — `"low" | "medium" | "high" | "max"` — Claude reasoning effort level, carried through `PaneController` and passed to `claude:restart-session`
 - `SessionBase` — shared base for `ChatSession` and `PersistedSession`
 - `BackgroundSessionSnapshot` — `{ isProcessing, isConnected, isCompacting, sessionInfo, totalCost, contextUsage }` snapshot for background store
 - `ContextUsage` (`src/types/mcp.ts`) — `{ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, contextWindow }` — context window consumption tracked per session
