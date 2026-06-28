@@ -77,7 +77,8 @@ src/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
 │   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
-│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
+│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete,
+│   │                  #   input-bar-utils.ts, constants.ts)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
@@ -693,6 +694,7 @@ Types shared between electron and renderer live in `shared/types/`. Both tsconfi
 - `BackgroundSessionSnapshot` — `{ isProcessing, isConnected, isCompacting, sessionInfo, totalCost, contextUsage }` snapshot for background store
 - `ContextUsage` (`src/types/mcp.ts`) — `{ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, contextWindow }` — context window consumption tracked per session
 - `GrabbedElement` (`src/types/attachments.ts`) — `{ id, tag, text, html, timestamp }` — DOM element captured from the Browser Panel for use as session context
+- `hasUnreadCompletion` (`ChatSession`) — optional boolean set when a background session completes while inactive; cleared when the session becomes active; drives a pulsing indicator in `SessionItem`
 
 **Electron SDK types**: `electron/src/lib/sdk.ts` imports `Query` and `query` types directly from `@anthropic-ai/claude-agent-sdk` (no more manual type definitions or double-casts). ACP connection is typed as `ClientSideConnection` from `@agentclientprotocol/sdk`.
 
