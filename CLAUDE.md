@@ -390,6 +390,7 @@ Three tiers of settings storage, each suited to different access patterns:
   - `useSessionRestart` — engine-aware restart-session flow
   - `useSessionSettings` — session-scoped settings derivation
   - `useExtraPaneLoader` — loads sessions for the secondary pane in split mode
+  - `types.ts` — shared types for session hooks: `StartOptions`, `CodexModelSummary`, `InitialMeta`, `SessionPaneBootstrap`, `DRAFT_ID`, `DEFAULT_PERMISSION_MODE`
 - `useEngineBase` — shared foundation for all engine hooks (state, rAF flush, reset effect); tracks `isCompacting` flag for context compaction in-progress
 - `useClaude` / `useACP` / `useCodex` — engine-specific event handling built on `useEngineBase`
 - `useSpaceTheme` — space color tinting via CSS custom properties
@@ -613,6 +614,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitTopRowItem.tsx` — renders a single item (chat pane or tool column) in the split-view top row; extracted from AppLayout
+- `SplitBottomToolIsland.tsx` — renders a single tool island in the split-view bottom dock; extracted from AppLayout
+- `SplitPaneToolStrip.tsx` — tool picker icon strip for toggling panels within a split pane
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
