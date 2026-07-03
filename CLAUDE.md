@@ -176,7 +176,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 **IPC API — Claude Sessions:**
 
 - `claude:start(options)` → spawns SDK query with AsyncChannel, returns `{ sessionId, pid }`
-  - Options: `cwd`, `model`, `permissionMode`, `resume` (session continuation)
+  - Options: `cwd`, `model`, `permissionMode`, `resume` (session continuation), `effort` (`ClaudeEffort`: `"low" | "medium" | "high" | "max"`)
   - Configures `canUseTool` callback for permission bridging
   - Thinking: `{ type: "enabled", budgetTokens: 16000 }`
 - `claude:send({ sessionId, message })` → pushes user message to session's AsyncChannel
