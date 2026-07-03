@@ -82,7 +82,7 @@ src/
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
 │   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
-│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
+│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels incl. AgentStore — in-app agent marketplace)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
 │   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, etc.)
@@ -106,7 +106,7 @@ src/
 │                      #   SettingsView, AppSidebar, chat-ui-state
 ├── hooks/
 │   ├── session/       # useSessionManager decomposed (lifecycle, persistence, draft, revival, queue,
-│   │                  #   cache, crud, pane, restart, settings, extra-pane-loader)
+│   │                  #   cache, crud, pane, restart, settings, extra-pane-loader) + types.ts (StartOptions)
 │   ├── app-layout/    # useAppOrchestrator decomposed (useAppLayoutUIState, useAppSessionActions,
 │   │                  #   useAppContextualPanels, useAppEnvironmentState, useAppSpaceWorkflow,
 │   │                  #   session-utils — shared session-creation option builder)
@@ -610,9 +610,12 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 
 `src/components/split/` implements a dual-pane chat layout (two sessions side by side):
 - `SplitPaneHost.tsx` — container that renders two `SplitChatPane` instances
+- `SplitChatPane.tsx` — single pane with its own session, tools, and input
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
-- `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitBottomToolIsland.tsx` — tool islands in the split-view bottom dock
+- `SplitPaneToolStrip.tsx` — tool icon strip (terminal, browser, files, etc.) for each pane
+- `SplitTopRowItem.tsx` — renders a single item (chat pane or tool column) in the split top row
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
@@ -665,7 +668,7 @@ Always search the web when needed for up-to-date API references, Electron APIs, 
 
 Types shared between electron and renderer live in `shared/types/`. Both tsconfigs include this directory via `@shared/*` path alias.
 
-- **`shared/types/codex-protocol/`** — auto-generated from `codex app-server generate-ts`. Contains v1, v2, and serde_json type families. Used by both electron Codex handlers and renderer hooks.
+- **`shared/types/codex-protocol/`** — auto-generated from `codex app-server generate-ts`. Contains ~200 individual type files at the root (e.g. `WebSearchItem.ts`, `CollabAgentSpawnBeginEvent.ts`) plus `index.ts`, `v2/`, and `serde_json/` subdirectories. Used by both electron Codex handlers and renderer hooks.
 - **`shared/types/codex.ts`** — re-exports with `Codex`-prefixed aliases (e.g., `CodexThreadItem`, `CodexSessionEvent`) plus Harnss-specific wrappers (`CodexApprovalRequest`, `CodexRequestUserInputRequest`).
 - **`shared/types/engine.ts`** — `EngineId`, `AppPermissionBehavior`, `SlashCommand`, `RespondPermissionFn`. No React or renderer dependencies.
 - **`src/types/engine-hook.ts`** — `EngineHookState`, `BackgroundSessionSnapshot`. React-dependent engine types that live in the renderer layer.
