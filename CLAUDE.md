@@ -75,13 +75,20 @@ electron/
 src/
 ├── components/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
-│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
+│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance,
+│   │                  #   BrowserStartPage, browser-types.ts, browser-utils.ts)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
-│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
+│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete,
+│   │                  #   constants.ts, input-bar-utils.ts)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
-│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
+│   ├── tool-renderers/# Built-in tool renderers; ExpandedToolContent.tsx is the central dispatcher
+│   │                  #   (switch on toolName → per-tool renderer or MCP/GenericContent fallback);
+│   │                  #   individual renderers: BashContent, EditContent, ReadContent, WriteContent,
+│   │                  #   SearchContent, WebFetchContent, WebSearchContent, TaskTool, TodoWriteContent,
+│   │                  #   SkillContent, PlanContent (EnterPlanMode/ExitPlanMode), ToolSearchContent,
+│   │                  #   AskUserQuestion, GenericContent (JSON fallback)
 │   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
@@ -106,7 +113,9 @@ src/
 │                      #   SettingsView, AppSidebar, chat-ui-state
 ├── hooks/
 │   ├── session/       # useSessionManager decomposed (lifecycle, persistence, draft, revival, queue,
-│   │                  #   cache, crud, pane, restart, settings, extra-pane-loader)
+│   │                  #   cache, crud, pane, restart, settings, extra-pane-loader);
+│   │                  #   types.ts — shared constants + types: StartOptions, SharedSessionRefs,
+│   │                  #   SharedSessionSetters, QueuedMessage, SessionPaneBootstrap, InitialMeta
 │   ├── app-layout/    # useAppOrchestrator decomposed (useAppLayoutUIState, useAppSessionActions,
 │   │                  #   useAppContextualPanels, useAppEnvironmentState, useAppSpaceWorkflow,
 │   │                  #   session-utils — shared session-creation option builder)
@@ -145,7 +154,9 @@ src/
 │                      #   welcome-screen.ts, welcome-screen-arrow.ts
 ├── stores/            # Zustand stores (settings-store.ts — localStorage wrapper)
 └── types/             # Renderer-side types (protocol, ui, session, spaces, attachments, tools,
-                       #   mcp, permissions, search, tool-islands, agents, window.d.ts) + re-export shims for shared/
+                       #   mcp, permissions, search, tool-islands, agents, window.d.ts) + re-export shims for shared/;
+                       #   codex-protocol/ — renderer-side copy of auto-generated Codex ts-rs types
+                       #   (200+ individual .ts files; separate from shared/types/codex-protocol/)
 ```
 
 ## How to Run
@@ -476,7 +487,7 @@ Tool panels share a resizable column. When multiple tools are active, they split
 
 **Terminal** (`ToolsPanel`): Multi-tab xterm.js instances. Each tab spawns a node-pty process in the main process via IPC. Uses `allowTransparency: true` + `background: "#00000000"` for transparent canvas that inherits the island's `bg-background`. The FitAddon + ResizeObserver auto-sizes the terminal on panel resize.
 
-**Browser** (`BrowserPanel`): Multi-tab Electron `<webview>` with URL bar, back/forward/reload, HTTPS indicator. Smart URL input: bare domains get `https://` prefix, non-URL text becomes a Google search.
+**Browser** (`BrowserPanel`): Multi-tab Electron `<webview>` with URL bar, back/forward/reload, HTTPS indicator. Smart URL input: bare domains get `https://` prefix, non-URL text becomes a Google search. `BrowserStartPage.tsx` is shown when no URL is loaded (centered URL bar + recent history links). `browser-types.ts` defines `ElectronWebviewElement` (typed webview DOM interface), `BrowserTab`, `BrowserHistoryEntry`, `PersistedBrowserSession`, `BrowserColorScheme`, and localStorage key constants. `browser-utils.ts` handles URL/title normalization and tab session persistence.
 
 **Open Files** (`FilesPanel`): Derives accessed files from the session's `UIMessage[]` array — no IPC needed. Scans `tool_call` messages for `Read`/`Edit`/`Write`/`NotebookEdit` tools + subagent steps. Tracks per-file access type (read/modified/created), deduplicates by path keeping highest access level, sorts by most recently accessed. Clicking a file scrolls to its last tool_call in chat.
 
@@ -665,11 +676,12 @@ Always search the web when needed for up-to-date API references, Electron APIs, 
 
 Types shared between electron and renderer live in `shared/types/`. Both tsconfigs include this directory via `@shared/*` path alias.
 
-- **`shared/types/codex-protocol/`** — auto-generated from `codex app-server generate-ts`. Contains v1, v2, and serde_json type families. Used by both electron Codex handlers and renderer hooks.
+- **`shared/types/codex-protocol/`** — auto-generated from `codex app-server generate-ts`. Contains v1, v2, and serde_json type families. Used by both electron Codex handlers and renderer hooks. **Note**: there is also a separate `src/types/codex-protocol/` directory (200+ individually exported ts-rs types) generated by the Codex Rust source; session sub-hooks import directly from this renderer-side copy (e.g. `import type { CollaborationMode } from "../../types/codex-protocol/CollaborationMode"`).
 - **`shared/types/codex.ts`** — re-exports with `Codex`-prefixed aliases (e.g., `CodexThreadItem`, `CodexSessionEvent`) plus Harnss-specific wrappers (`CodexApprovalRequest`, `CodexRequestUserInputRequest`).
 - **`shared/types/engine.ts`** — `EngineId`, `AppPermissionBehavior`, `SlashCommand`, `RespondPermissionFn`. No React or renderer dependencies.
 - **`src/types/engine-hook.ts`** — `EngineHookState`, `BackgroundSessionSnapshot`. React-dependent engine types that live in the renderer layer.
 - **`src/types/agents.ts`** — `BackgroundAgent`, `BackgroundAgentActivity`, `BackgroundAgentUsage`. Renderer-only types for tracking background Task agents (status, activity log, live usage metrics, progress summary, current tool).
+- **`src/hooks/session/types.ts`** — shared constants (`DRAFT_ID`, `DEFAULT_PERMISSION_MODE`) and types used across all 11 session sub-hooks: `StartOptions` (model, permissionMode, planMode, thinkingEnabled, effort, engine, agentId, cachedConfigOptions), `SharedSessionRefs` (~25 `MutableRefObject`s shared across sub-hooks), `SharedSessionSetters` (~20 React dispatchers), `QueuedMessage`, `PendingAcpDraftPrompt`, `SessionPaneBootstrap`, `InitialMeta`, `CodexModelSummary`.
 - **`shared/types/acp.ts`** — ACP session update discriminated union types.
 - **`shared/types/registry.ts`** — agent registry types (`RegistryAgent`, `RegistryData`).
 - **`shared/types/git.ts`** — git operation types: `GitFileStatus`, `GitBranch`, `GitRepoInfo`, `GitStatus`, `GitLogEntry`, `GitWorktree`.
