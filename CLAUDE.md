@@ -75,17 +75,21 @@ electron/
 src/
 ├── components/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
-│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
+│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance,
+│   │                  #   BrowserStartPage, browser-types.ts, browser-utils.ts)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
 │   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
-│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
+│   ├── tool-renderers/# Built-in tool renderers (ExpandedToolContent — central router, BashContent,
+│   │                  #   EditContent, TaskTool, WebSearchContent, ToolSearchContent, SkillContent,
+│   │                  #   PlanContent, etc.)
 │   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
-│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, etc.)
+│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle,
+│   │                  #   SplitDropZone, SplitTopRowItem, SplitBottomToolIsland, SplitPaneToolStrip)
 │   ├── welcome/       # Onboarding wizard (WelcomeWizard, 9 step components)
 │   ├── workspace/     # Workspace layout (MainTopToolArea, MainBottomToolDock, RightPanel, ToolIslandContent)
 │   ├── lib/           # Component-local utilities (tool-metadata, tool-formatting, ToolGlyph, chat-layout)
@@ -464,6 +468,8 @@ Key event types in order:
 
 **Codex plan mode**: Codex sessions support a `planMode` flag that restricts the agent to planning/read-only operations before execution. `planMode: boolean` is a setting in `useSettings`. `codexPlanModeEnabled` is derived in `useSessionManager` from either the active `startOptions.planMode` (for draft sessions) or the persisted `session.planMode` (for live sessions). `getSyncedPlanMode(sessionPlanMode, livePermissionMode)` in `useAppOrchestrator` reconciles the session flag with the live permission mode string — the live mode takes priority when present. Plan text output streams into `codexPlanText` in `InternalState`.
 
+**Codex web search**: Codex sessions emit `webSearch` thread items when the agent searches the web. `codex-adapter.ts` maps these to `web_search` tool_call messages via `codexWebSearchToToolPayload()` / `describeWebSearchAction()`, which are then rendered by `WebSearchContent.tsx` as structured tool cards (query, action type, result links).
+
 **Context compaction**: The `compact` operation (via `codex:compact` IPC for Codex or SDK-native for Claude) condenses the conversation history to free context window space. `isCompacting` in `EngineHookState` is set true during compaction, toggling a visual indicator. Claude sessions emit a `system (compact_boundary)` event to mark compaction boundaries in the transcript.
 
 ### Tools Panel System
@@ -479,6 +485,10 @@ Tool panels share a resizable column. When multiple tools are active, they split
 **Browser** (`BrowserPanel`): Multi-tab Electron `<webview>` with URL bar, back/forward/reload, HTTPS indicator. Smart URL input: bare domains get `https://` prefix, non-URL text becomes a Google search.
 
 **Open Files** (`FilesPanel`): Derives accessed files from the session's `UIMessage[]` array — no IPC needed. Scans `tool_call` messages for `Read`/`Edit`/`Write`/`NotebookEdit` tools + subagent steps. Tracks per-file access type (read/modified/created), deduplicates by path keeping highest access level, sorts by most recently accessed. Clicking a file scrolls to its last tool_call in chat.
+
+### Built-in Tool Rendering System
+
+Built-in (non-MCP) tool calls are dispatched by `ExpandedToolContent.tsx`, which routes a `UIMessage` to the appropriate renderer by `toolName` (e.g., `BashContent`, `EditContent`, `TaskTool`, `WebSearchContent` for Codex web searches, `ToolSearchContent` for SDK deferred-tool lookups, `SkillContent` for Codex skills, `PlanContent` for Codex plan mode enter/exit events).
 
 ### MCP Tool Rendering System
 
@@ -613,6 +623,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitTopRowItem.tsx` — renders a single chat-pane or tool-column slot in the top row
+- `SplitBottomToolIsland.tsx` — renders a tool island in the split-view bottom dock
+- `SplitPaneToolStrip.tsx` — per-pane tool icon strip (contextual tools + drag support, one per pane)
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
@@ -684,7 +697,7 @@ Types shared between electron and renderer live in `shared/types/`. Both tsconfi
 - `error-utils.ts` — `extractErrorMessage()` without PostHog dependency
 - `acp-helpers.ts` / `codex-helpers.ts` — event normalization helpers
 
-**Backward compatibility**: `src/types/` contains re-export shims (`export * from "../../shared/types/..."`) so existing `@/types/*` imports continue to work. New code can use either `@/types/` or `@shared/types/`.
+**Backward compatibility**: `src/types/` contains re-export shims (`export * from "../../shared/types/..."`) so existing `@/types/*` imports continue to work. New code can use either `@/types/` or `@shared/types/`. Exception: `src/types/codex-protocol/` is a full copy of `shared/types/codex-protocol/` (not a shim) so the renderer can import it via `@/` without needing the `@shared/` alias.
 
 **Key type naming**:
 - `InstalledAgent` (was `AgentDefinition` — renamed to avoid SDK clash)
