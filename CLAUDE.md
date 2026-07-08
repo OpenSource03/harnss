@@ -81,7 +81,10 @@ src/
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
-│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
+│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, WriteContent, ReadContent,
+│   │                  #   TaskTool, TodoWriteContent, WebSearchContent, WebFetchContent, SearchContent,
+│   │                  #   SkillContent, PlanContent, ToolSearchContent, AskUserQuestion,
+│   │                  #   ExpandedToolContent, GenericContent)
 │   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
@@ -665,7 +668,7 @@ Always search the web when needed for up-to-date API references, Electron APIs, 
 
 Types shared between electron and renderer live in `shared/types/`. Both tsconfigs include this directory via `@shared/*` path alias.
 
-- **`shared/types/codex-protocol/`** — auto-generated from `codex app-server generate-ts`. Contains v1, v2, and serde_json type families. Used by both electron Codex handlers and renderer hooks.
+- **`shared/types/codex-protocol/`** — auto-generated from `codex app-server generate-ts`. Contains root-level types, v2/, and serde_json/ type families. Used by both electron Codex handlers and renderer hooks. A mirrored copy lives in `src/types/codex-protocol/` for the renderer bundle (same generated output, separate for build-process isolation).
 - **`shared/types/codex.ts`** — re-exports with `Codex`-prefixed aliases (e.g., `CodexThreadItem`, `CodexSessionEvent`) plus Harnss-specific wrappers (`CodexApprovalRequest`, `CodexRequestUserInputRequest`).
 - **`shared/types/engine.ts`** — `EngineId`, `AppPermissionBehavior`, `SlashCommand`, `RespondPermissionFn`. No React or renderer dependencies.
 - **`src/types/engine-hook.ts`** — `EngineHookState`, `BackgroundSessionSnapshot`. React-dependent engine types that live in the renderer layer.
@@ -684,7 +687,7 @@ Types shared between electron and renderer live in `shared/types/`. Both tsconfi
 - `error-utils.ts` — `extractErrorMessage()` without PostHog dependency
 - `acp-helpers.ts` / `codex-helpers.ts` — event normalization helpers
 
-**Backward compatibility**: `src/types/` contains re-export shims (`export * from "../../shared/types/..."`) so existing `@/types/*` imports continue to work. New code can use either `@/types/` or `@shared/types/`.
+**Backward compatibility**: Many files in `src/types/` are re-export shims (`export * from "../../shared/types/..."`) so existing `@/types/*` imports continue to work. New code can use either `@/types/` or `@shared/types/`. Exception: `src/types/codex-protocol/` is a full generated copy (not a shim) used exclusively by renderer-process imports.
 
 **Key type naming**:
 - `InstalledAgent` (was `AgentDefinition` — renamed to avoid SDK clash)
