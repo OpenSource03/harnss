@@ -627,11 +627,11 @@ Claude CLI and Codex binaries can be managed downloads or user-provided custom p
 
 ## Reference Documentation
 
-When working on engine-related code, always consult these local docs:
+When working on engine-related code, consult the upstream docs directly:
 
-- **Claude Agent SDK (Anthropic engine)**: `docs/ai-sdk/` — covers `query()`, MCP config, permissions, streaming, session management, subagents, etc.
-- **ACP TypeScript SDK**: `docs/typescript-sdk-main/` — the `@anthropic-ai/agent-client-protocol` package, ACP client/server types, transport
-- **Agent Client Protocol spec**: `docs/agent-client-protocol-main/` — ACP protocol spec, schema definitions, event types
+- **Claude Agent SDK (Anthropic engine)**: https://github.com/anthropics/claude-agent-sdk — covers `query()`, MCP config, permissions, streaming, session management, subagents, etc.
+- **ACP TypeScript SDK**: https://github.com/anthropics/agent-client-protocol — the `@agentclientprotocol/sdk` package, ACP client/server types, transport
+- **Agent Client Protocol spec**: https://agentclientprotocol.org — ACP protocol spec, schema definitions, event types
 
 Always search the web when needed for up-to-date API references, Electron APIs, or third-party package docs.
 
