@@ -81,7 +81,11 @@ src/
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
-│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
+│   ├── tool-renderers/# Built-in tool renderers — `ExpandedToolContent.tsx` is the central dispatcher
+│   │                  #   (switch on toolName) that routes to: BashContent, EditContent, WriteContent,
+│   │                  #   ReadContent, SearchContent, WebSearchContent, WebFetchContent, TodoWriteContent,
+│   │                  #   TaskTool, PlanContent (EnterPlanModeContent/ExitPlanModeContent), SkillContent,
+│   │                  #   ToolSearchContent, AskUserQuestion, GenericContent. Add new renderers here.
 │   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
