@@ -176,7 +176,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 **IPC API — Claude Sessions:**
 
 - `claude:start(options)` → spawns SDK query with AsyncChannel, returns `{ sessionId, pid }`
-  - Options: `cwd`, `model`, `permissionMode`, `resume` (session continuation)
+  - Options: `cwd`, `model`, `permissionMode`, `resume` (session continuation), `effort` (`"low" | "medium" | "high" | "max"`), `forkSession` (branch to a new session ID when resuming), `resumeSessionAt` (truncate history at a message UUID — used with `forkSession`)
   - Configures `canUseTool` callback for permission bridging
   - Thinking: `{ type: "enabled", budgetTokens: 16000 }`
 - `claude:send({ sessionId, message })` → pushes user message to session's AsyncChannel
@@ -197,7 +197,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `claude:models-cache:revalidate(options?)` → forces a model cache refresh
 - `claude:version` → returns the Claude CLI version string
 - `claude:binary-status` → returns binary detection status (found path or error)
-- `claude:restart-session` → restarts a stopped/crashed session
+- `claude:restart-session({ sessionId, effort?, model? })` → restarts a stopped/crashed session with optional effort/model override
 - `claude:generate-title(message, cwd?)` → one-shot Haiku query for chat title
 - Events sent to renderer via `claude:event` tagged with `_sessionId`
 - Permission requests sent via `claude:permission_request` with requestId
@@ -221,7 +221,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 **IPC API — Codex Sessions:**
 
 - `codex:start` → spawns Codex process + RPC channel, returns `{ sessionId }`
-- `codex:send` → sends a user message to the active Codex session
+- `codex:send({ sessionId, text, images?, effort?, collaborationMode? })` → sends a user message; optional `effort` overrides reasoning effort for that turn; optional `collaborationMode` triggers plan execution with a specific collaboration config
 - `codex:stop(sessionId)` → terminates the Codex process
 - `codex:interrupt(sessionId)` → interrupts the current Codex turn
 - `codex:compact(sessionId)` → triggers context compaction for a Codex session
@@ -335,12 +335,12 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 
 **IPC API — Jira:**
 
-- `jira:get-config` — returns stored Jira OAuth config and selected board
-- `jira:save-config(config)` — saves Jira connection settings
-- `jira:delete-config` — removes stored Jira credentials
+- `jira:get-config(projectId)` — returns stored Jira config for a project
+- `jira:save-config({ projectId, config })` — saves Jira connection settings for a project
+- `jira:delete-config(projectId)` — removes stored Jira credentials for a project
 - `jira:authenticate` — opens browser for Jira OAuth flow (loopback redirect)
-- `jira:auth-status` — returns current OAuth token status
-- `jira:logout` — clears stored Jira OAuth tokens
+- `jira:auth-status(instanceUrl)` — returns OAuth token status for a Jira instance URL
+- `jira:logout(instanceUrl)` — clears stored Jira OAuth tokens for a Jira instance URL
 - `jira:get-boards` — lists accessible Jira boards
 - `jira:get-projects` — lists accessible Jira projects
 - `jira:get-sprints(boardId)` — lists sprints for a board
