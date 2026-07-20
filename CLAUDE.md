@@ -454,7 +454,7 @@ Key event types in order:
 
 **Permission bridging**: SDK's async `canUseTool` callback creates a Promise stored in `pendingPermissions` Map. Main process sends `claude:permission_request` to renderer. UI shows `PermissionPrompt`. User decision sent back via `claude:permission_response`, resolving the stored Promise to allow/deny the tool.
 
-**Background session store**: When switching sessions, the active session's state (messages, processing flag, sessionInfo, cost) is captured into `BackgroundSessionStore`. Events for non-active sessions route to the store instead of React state. On switch-back, state is consumed from the store to restore the UI instantly.
+**Background session store**: When switching sessions, the active session's state (messages, processing flag, sessionInfo, cost) is captured into `BackgroundSessionStore`. Events for non-active sessions route to the store instead of React state. On switch-back, state is consumed from the store to restore the UI instantly. `BackgroundSessionStore` exposes `updateMessages()` and `setProcessing()` to support background queue draining — `useMessageQueue` continues draining queued messages for inactive sessions rather than stalling until the session is reactivated.
 
 **Glass morphism**: On macOS Tahoe+, uses `electron-liquid-glass` for native transparency. DevTools opened via remote debugging on a separate window to avoid Electron bug #42846 (transparent + frameless + DevTools = broken clicks).
 
@@ -585,6 +585,10 @@ Each Space can have a custom color and icon. `SpaceCustomizer.tsx` provides the 
 
 `src/lib/notification-utils.ts` triggers OS notifications (via Electron's `Notification` API) when sessions complete or produce output while unfocused. Settings control trigger mode: `always`, `unfocused` (default), or `never`. `src/lib/session-notifications.ts` maps session result events to notification calls. `useNotifications` hook wires this to the active session state.
 
+- **Actor-aware labels**: notification text shows the actual model/agent name (e.g. "Claude Sonnet has finished") rather than a generic label.
+- **Click-to-navigate**: clicking an OS notification navigates directly to the relevant session.
+- **Unread indicator**: `SessionItem.tsx` shows a pulsing green dot for background sessions that complete while inactive; cleared on focus.
+
 ### Context Window Gauge
 
 `ContextGauge` (`src/components/input-bar/ContextGauge.tsx`) is an SVG ring gauge embedded in the input bar that visualizes context window consumption:
@@ -613,6 +617,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitPaneToolStrip.tsx` — per-pane vertical tool-toggle icon strip in split view
+- `SplitBottomToolIsland.tsx` — renders a single tool island in the split-view bottom dock
+- `SplitTopRowItem.tsx` — renders one item (chat pane or tool column) in the split-view top row
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
