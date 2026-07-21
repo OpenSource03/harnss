@@ -8,7 +8,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 - **Build**: Vite 7, TypeScript 5.9, tsup (electron TS→JS), electron-builder (cross-platform packaging)
 - **Testing**: vitest (unit tests for hooks, lib utilities, and electron modules; config: `vitest.config.electron.ts`)
 - **Styling**: Tailwind CSS v4 + ShadCN UI (includes Preflight — no CSS resets needed)
-- **UI Components**: ShadCN (Button, Badge, ScrollArea, Tooltip, Collapsible, Separator, DropdownMenu, Avatar)
+- **UI Components**: ShadCN (Button, Badge, ScrollArea, Tooltip, Collapsible, Separator, DropdownMenu, Avatar, Dialog, Input, Popover, Select, Slider, Switch, Tabs) + custom `confirm-dialog.tsx` (reusable confirmation dialog) and `text-shimmer.tsx` (animated shimmer text) in `src/components/ui/`
 - **Icons**: lucide-react
 - **Markdown**: react-markdown + remark-gfm + react-syntax-highlighter + @tailwindcss/typography
 - **Diff**: diff (word-level diff rendering)
@@ -19,7 +19,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 - **Browser**: Electron `<webview>` tag (requires `webviewTag: true` in webPreferences)
 - **Virtualization**: @tanstack/react-virtual (chat message windowing)
 - **State management**: zustand (settings store, localStorage wrapper)
-- **Animation**: motion (v12, formerly framer-motion)
+- **Animation**: motion (v12, formerly framer-motion) + tw-animate-css (Tailwind CSS animation utilities, devDependency)
 - **Canvas/Annotations**: react-konva + konva (image annotation editor)
 - **Diagrams**: mermaid (MermaidDiagram.tsx)
 - **Code editor**: @monaco-editor/react (Monaco VS Code editor integration)
