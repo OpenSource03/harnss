@@ -31,6 +31,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 - **Context menus**: electron-context-menu (right-click context menus in Electron)
 - **Auto-updater**: electron-updater (managed binary auto-update infrastructure)
 - **UI primitives**: radix-ui (direct Radix primitive usage, separate from ShadCN)
+- **CSS animations**: tw-animate-css (Tailwind v4 animation utilities, imported in `src/index.css`)
 - **Package manager**: pnpm
 - **Path aliases**: `@/` → `./src/`, `@shared/` → `./shared/`
 
@@ -81,7 +82,7 @@ src/
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
-│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
+│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, PlanContent, SkillContent, ToolSearchContent, GenericContent, etc.); ExpandedToolContent.tsx is the central dispatcher that routes toolName to the correct renderer
 │   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
@@ -378,7 +379,7 @@ Three tiers of settings storage, each suited to different access patterns:
   - `useAppContextualPanels` — which panels are visible based on active session
   - `useAppEnvironmentState` — environment checks, update banner, prerelease detection
   - `useAppSpaceWorkflow` — space switching, worktree selection, space creation flow
-- `useSessionManager` — orchestrator composing 11 sub-hooks:
+- `useSessionManager` — orchestrator composing 11 sub-hooks. All shared state is threaded through `SharedSessionRefs` and `SharedSessionSetters` from `src/hooks/session/types.ts`, which is also the home of `StartOptions`, `QueuedMessage`, `EngineHooks`, and utility functions (`getSelectedPermissionMode`, `getEffectiveClaudePermissionMode`, `normalizeCodexModels`, etc.) — edit this file when adding new session sub-hooks or shared state:
   - `useSessionLifecycle` — session CRUD (create, switch, delete, rename, deselect)
   - `useSessionPersistence` — auto-save with debounce, background store seeding/consuming
   - `useDraftMaterialization` — draft-to-live session transitions for all 3 engines
@@ -463,6 +464,8 @@ Key event types in order:
 **Pane controller pattern**: `usePaneController` (`src/hooks/usePaneController.ts`) builds a `PaneController` object (defined in `src/types/pane-controller.ts`) containing all per-pane callbacks — send, stop, interrupt, set-model, set-permission-mode, onElementGrab. Both the single-pane layout and each `SplitChatPane` receive a `PaneController`, enabling full parity without prop drilling or conditional logic.
 
 **Codex plan mode**: Codex sessions support a `planMode` flag that restricts the agent to planning/read-only operations before execution. `planMode: boolean` is a setting in `useSettings`. `codexPlanModeEnabled` is derived in `useSessionManager` from either the active `startOptions.planMode` (for draft sessions) or the persisted `session.planMode` (for live sessions). `getSyncedPlanMode(sessionPlanMode, livePermissionMode)` in `useAppOrchestrator` reconciles the session flag with the live permission mode string — the live mode takes priority when present. Plan text output streams into `codexPlanText` in `InternalState`.
+
+**Codex web search**: Codex `webSearch` items (with `type`, `id`, `query`, and multi-query `action`) are normalized into a `WebSearch` tool call with `completed` status by `codexItemToToolInput` / `codexItemToToolResult` in `src/lib/engine/codex-adapter.ts`, allowing web search activity to render in the chat exactly like other tool calls.
 
 **Context compaction**: The `compact` operation (via `codex:compact` IPC for Codex or SDK-native for Claude) condenses the conversation history to free context window space. `isCompacting` in `EngineHookState` is set true during compaction, toggling a visual indicator. Claude sessions emit a `system (compact_boundary)` event to mark compaction boundaries in the transcript.
 
