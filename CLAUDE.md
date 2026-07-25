@@ -106,7 +106,9 @@ src/
 │                      #   SettingsView, AppSidebar, chat-ui-state
 ├── hooks/
 │   ├── session/       # useSessionManager decomposed (lifecycle, persistence, draft, revival, queue,
-│   │                  #   cache, crud, pane, restart, settings, extra-pane-loader)
+│   │                  #   cache, crud, pane, restart, settings, extra-pane-loader, types)
+│   │                  #   types.ts — shared types: StartOptions, DRAFT_ID, DEFAULT_PERMISSION_MODE,
+│   │                  #              CodexModelSummary, InitialMeta
 │   ├── app-layout/    # useAppOrchestrator decomposed (useAppLayoutUIState, useAppSessionActions,
 │   │                  #   useAppContextualPanels, useAppEnvironmentState, useAppSpaceWorkflow,
 │   │                  #   session-utils — shared session-creation option builder)
@@ -613,6 +615,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitPaneToolStrip.tsx` — vertical tool icon bar for each split pane
+- `SplitBottomToolIsland.tsx` — tool island rendered in the split-view bottom dock
+- `SplitTopRowItem.tsx` — single chat pane or tool column in the split-view top row
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
