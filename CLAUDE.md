@@ -583,7 +583,7 @@ Each Space can have a custom color and icon. `SpaceCustomizer.tsx` provides the 
 
 ### Notification System
 
-`src/lib/notification-utils.ts` triggers OS notifications (via Electron's `Notification` API) when sessions complete or produce output while unfocused. Settings control trigger mode: `always`, `unfocused` (default), or `never`. `src/lib/session-notifications.ts` maps session result events to notification calls. `useNotifications` hook wires this to the active session state.
+`src/lib/notification-utils.ts` triggers OS notifications (via Electron's `Notification` API) and notification sounds for key session events. Each event category has independent `osNotification` and `sound` triggers (`always`/`unfocused`/`never`): `sessionComplete`, `permissions`, `askUserQuestion`, and `exitPlanMode`. This per-event config is stored as `NotificationSettings` in `AppSettings` (see `shared/types/settings.ts`). `src/lib/session-notifications.ts` provides `getSessionNotificationActor()` which resolves the display name (engine model or agent name) shown in notification titles. `useNotifications` hook wires all of this to the active session state.
 
 ### Context Window Gauge
 
@@ -715,8 +715,8 @@ Types shared between electron and renderer live in `shared/types/`. Both tsconfi
 - **`src/lib/icon-utils.ts`** — agent icon URL resolution
 - **`src/lib/jira-utils.ts`** — Jira formatting helpers (issue key, priority icons, etc.)
 - **`src/lib/model-utils.ts`** — model name parsing and display normalization
-- **`src/lib/notification-utils.ts`** — OS notification trigger logic (respects `notifyOn: always/unfocused/never`)
-- **`src/lib/session-notifications.ts`** — maps session events to notification triggers
+- **`src/lib/notification-utils.ts`** — per-event OS notification and sound trigger logic; each of `sessionComplete`, `permissions`, `askUserQuestion`, `exitPlanMode` has independent `osNotification` and `sound` settings (`always`/`unfocused`/`never`)
+- **`src/lib/session-notifications.ts`** — `getSessionNotificationActor()` resolves the engine model/agent name for notification titles; maps session events to notification triggers
 - **`src/lib/session/records.ts`** — `UIMessage` and `ChatSession` type guards
 - **`src/lib/session/derived-data.ts`** — computed session stats (token counts, cost summaries)
 - **`src/lib/session/space-projects.ts`** — helpers for resolving which project/space a session belongs to
