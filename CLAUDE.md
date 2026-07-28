@@ -75,17 +75,24 @@ electron/
 src/
 ├── components/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
-│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
+│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance,
+│   │                  #   BrowserStartPage — new-tab/start page with recent history)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
 │   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
-│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
-│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
+│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, ReadContent,
+│   │                  #   WriteContent, SearchContent, WebFetchContent, WebSearchContent,
+│   │                  #   GenericContent, PlanContent, SkillContent, ToolSearchContent, etc.)
+│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels):
+│   │                  #   GeneralSettings, AppearanceSettings, EngineSettings, AgentSettings,
+│   │                  #   AgentStore (marketplace browser), McpSettings, NotificationsSettings,
+│   │                  #   AnalyticsSettings, AdvancedSettings, AboutSettings
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
-│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, etc.)
+│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle,
+│   │                  #   SplitDropZone, SplitBottomToolIsland, SplitPaneToolStrip, SplitTopRowItem)
 │   ├── welcome/       # Onboarding wizard (WelcomeWizard, 9 step components)
 │   ├── workspace/     # Workspace layout (MainTopToolArea, MainBottomToolDock, RightPanel, ToolIslandContent)
 │   ├── lib/           # Component-local utilities (tool-metadata, tool-formatting, ToolGlyph, chat-layout)
@@ -198,7 +205,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `claude:version` → returns the Claude CLI version string
 - `claude:binary-status` → returns binary detection status (found path or error)
 - `claude:restart-session` → restarts a stopped/crashed session
-- `claude:generate-title(message, cwd?)` → one-shot Haiku query for chat title
+- `claude:generate-title({ message, cwd?, engine?, sessionId? })` → one-shot query for chat title; `engine` routes to ACP or Codex engine, `sessionId` is the ACP session id when `engine === "acp"`
 - Events sent to renderer via `claude:event` tagged with `_sessionId`
 - Permission requests sent via `claude:permission_request` with requestId
 
@@ -275,7 +282,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `files:list-all(cwd)` — lists all files including untracked
 - `files:watch(cwd)` / `files:unwatch(cwd)` — start/stop file change watching (emits `files:changed`)
 - `files:calculate-deep-size({ cwd, paths })` — calculates total size of a set of paths
-- `files:read-multiple(cwd, paths)` — batch read with path validation and size limits
+- `files:read-multiple({ cwd, paths, deepPaths? })` — batch read with path validation and size limits; `deepPaths` receives recursive/deep tree expansion instead of single-file content
 - `file:read(filePath)` — single file read (used for diff context)
 - `file:rename({ oldPath, newPath })` / `file:trash(filePath)` — file management
 - `file:new-file(filePath)` / `file:new-folder(folderPath)` — create new files/folders
