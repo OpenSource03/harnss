@@ -19,7 +19,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 - **Browser**: Electron `<webview>` tag (requires `webviewTag: true` in webPreferences)
 - **Virtualization**: @tanstack/react-virtual (chat message windowing)
 - **State management**: zustand (settings store, localStorage wrapper)
-- **Animation**: motion (v12, formerly framer-motion)
+- **Animation**: motion (v12, formerly framer-motion) + tw-animate-css (Tailwind CSS animation plugin)
 - **Canvas/Annotations**: react-konva + konva (image annotation editor)
 - **Diagrams**: mermaid (MermaidDiagram.tsx)
 - **Code editor**: @monaco-editor/react (Monaco VS Code editor integration)
@@ -75,14 +75,24 @@ electron/
 src/
 ├── components/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
-│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
-│   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
-│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
+│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance,
+│   │                  #   BrowserStartPage — new-tab start page with history links,
+│   │                  #   browser-types.ts — ElectronWebviewElement/BrowserHistoryEntry types,
+│   │                  #   browser-utils.ts — extractHostname() and other helpers)
+│   ├── input-bar/     # InputBar and its decomposed parts (InputBar.tsx lives here, not root-level;
+│   │                  #   CommandPicker, MentionPicker, EngineControls, AttachmentPreview,
+│   │                  #   ContextGauge, EnginePickerDropdown, useMentionAutocomplete,
+│   │                  #   input-bar-utils.ts, constants.ts)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
-│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
-│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
+│   ├── tool-renderers/# Built-in tool renderers. ExpandedToolContent.tsx is the central dispatcher
+│   │                  #   (switch on toolName → per-tool renderer). Renderers: BashContent, EditContent,
+│   │                  #   ReadContent, WriteContent, SearchContent, WebSearchContent, WebFetchContent,
+│   │                  #   TodoWriteContent, AskUserQuestion, TaskTool, PlanContent (EnterPlanMode/ExitPlanMode),
+│   │                  #   ToolSearchContent, SkillContent, GenericContent (fallback)
+│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (13 panels, including
+│   │                  #   AgentStore.tsx — browse/install/update agents from the registry)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
 │   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, etc.)
@@ -90,7 +100,7 @@ src/
 │   ├── workspace/     # Workspace layout (MainTopToolArea, MainBottomToolDock, RightPanel, ToolIslandContent)
 │   ├── lib/           # Component-local utilities (tool-metadata, tool-formatting, ToolGlyph, chat-layout)
 │   ├── ui/            # ShadCN base components (auto-generated)
-│   └── *.tsx          # ~40 root-level component files: AppLayout, ChatView, ChatHeader, InputBar,
+│   └── *.tsx          # ~40 root-level component files: AppLayout, ChatView, ChatHeader,
 │                      #   ToolCall, McpToolContent, PermissionPrompt, ToolsPanel, ToolPicker,
 │                      #   ToolGroupBlock, BrowserPanel, FilesPanel, ProjectFilesPanel, TodoPanel,
 │                      #   BackgroundAgentsPanel, AgentTranscriptViewer, AgentContext, AgentIcon,
@@ -465,6 +475,8 @@ Key event types in order:
 **Codex plan mode**: Codex sessions support a `planMode` flag that restricts the agent to planning/read-only operations before execution. `planMode: boolean` is a setting in `useSettings`. `codexPlanModeEnabled` is derived in `useSessionManager` from either the active `startOptions.planMode` (for draft sessions) or the persisted `session.planMode` (for live sessions). `getSyncedPlanMode(sessionPlanMode, livePermissionMode)` in `useAppOrchestrator` reconciles the session flag with the live permission mode string — the live mode takes priority when present. Plan text output streams into `codexPlanText` in `InternalState`.
 
 **Context compaction**: The `compact` operation (via `codex:compact` IPC for Codex or SDK-native for Claude) condenses the conversation history to free context window space. `isCompacting` in `EngineHookState` is set true during compaction, toggling a visual indicator. Claude sessions emit a `system (compact_boundary)` event to mark compaction boundaries in the transcript.
+
+**Codex webSearch events**: Codex sessions emit `webSearch` events (with `action.type: "search"` or `action.type: "open"`) that `background-codex-handler.ts` maps to `tool_call`/`tool_result` UIMessage pairs — surfaced in the chat as web search tool cards alongside regular tool activity.
 
 ### Tools Panel System
 
