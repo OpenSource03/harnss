@@ -6,7 +6,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 
 - **Runtime**: Electron 40 (main process) + React 19 (renderer)
 - **Build**: Vite 7, TypeScript 5.9, tsup (electron TS→JS), electron-builder (cross-platform packaging)
-- **Testing**: vitest (unit tests for hooks, lib utilities, and electron modules; config: `vitest.config.electron.ts`)
+- **Testing**: vitest (unit tests covering renderer components, hooks, lib utilities, and electron modules; config: `vitest.config.electron.ts`)
 - **Styling**: Tailwind CSS v4 + ShadCN UI (includes Preflight — no CSS resets needed)
 - **UI Components**: ShadCN (Button, Badge, ScrollArea, Tooltip, Collapsible, Separator, DropdownMenu, Avatar)
 - **Icons**: lucide-react
@@ -75,14 +75,14 @@ electron/
 src/
 ├── components/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
-│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
+│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, BrowserStartPage; browser-types.ts, browser-utils.ts)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
 │   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
 │   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
-│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
+│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (AgentStore marketplace browser, General, Appearance, Engine, Agents, Notifications, Analytics, About, Advanced, MCP, etc.)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
 │   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, etc.)
@@ -106,7 +106,7 @@ src/
 │                      #   SettingsView, AppSidebar, chat-ui-state
 ├── hooks/
 │   ├── session/       # useSessionManager decomposed (lifecycle, persistence, draft, revival, queue,
-│   │                  #   cache, crud, pane, restart, settings, extra-pane-loader)
+│   │                  #   cache, crud, pane, restart, settings, extra-pane-loader) + types.ts (StartOptions, DRAFT_ID, QueuedMessage, etc.)
 │   ├── app-layout/    # useAppOrchestrator decomposed (useAppLayoutUIState, useAppSessionActions,
 │   │                  #   useAppContextualPanels, useAppEnvironmentState, useAppSpaceWorkflow,
 │   │                  #   session-utils — shared session-creation option builder)
