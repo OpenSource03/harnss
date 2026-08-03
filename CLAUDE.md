@@ -81,7 +81,10 @@ src/
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
-│   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
+│   ├── tool-renderers/# Built-in tool renderers — ExpandedToolContent (central dispatch router),
+│   │                  #   BashContent, EditContent, ReadContent, WriteContent, SearchContent,
+│   │                  #   WebFetchContent, WebSearchContent, SkillContent, ToolSearchContent,
+│   │                  #   AskUserQuestion, PlanContent, TaskTool, GenericContent (fallback)
 │   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
@@ -613,6 +616,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitTopRowItem.tsx` — renders one top-row slot (tool island column or SplitChatPane)
+- `SplitBottomToolIsland.tsx` — renders a single tool island in the split-view bottom dock
+- `SplitPaneToolStrip.tsx` — per-pane vertical icon strip that toggles panel tools within a split pane
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
