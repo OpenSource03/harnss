@@ -30,6 +30,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 - **Syntax highlighting**: refractor (Prism via refractor, used by syntax-highlight.tsx)
 - **Context menus**: electron-context-menu (right-click context menus in Electron)
 - **Auto-updater**: electron-updater (managed binary auto-update infrastructure)
+- **Animation utilities**: tw-animate-css (Tailwind animation CSS classes, imported in `src/index.css`)
 - **UI primitives**: radix-ui (direct Radix primitive usage, separate from ShadCN)
 - **Package manager**: pnpm
 - **Path aliases**: `@/` → `./src/`, `@shared/` → `./shared/`
@@ -75,18 +76,21 @@ electron/
 src/
 ├── components/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
-│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
+│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance,
+│   │                  #   BrowserStartPage, browser-types.ts, browser-utils.ts)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
 │   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
 │   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
-│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
+│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (About, Advanced, Agent,
+│   │                  #   AgentStore, Analytics, Appearance, Engine, General, Mcp, Notifications)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
-│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, etc.)
-│   ├── welcome/       # Onboarding wizard (WelcomeWizard, 9 step components)
+│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, SplitDropZone,
+│   │                  #   SplitBottomToolIsland, SplitPaneToolStrip, SplitTopRowItem)
+│   ├── welcome/       # Onboarding wizard (WelcomeWizard, 7 step components + StepIndicator, shared.ts)
 │   ├── workspace/     # Workspace layout (MainTopToolArea, MainBottomToolDock, RightPanel, ToolIslandContent)
 │   ├── lib/           # Component-local utilities (tool-metadata, tool-formatting, ToolGlyph, chat-layout)
 │   ├── ui/            # ShadCN base components (auto-generated)
@@ -197,8 +201,8 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `claude:models-cache:revalidate(options?)` → forces a model cache refresh
 - `claude:version` → returns the Claude CLI version string
 - `claude:binary-status` → returns binary detection status (found path or error)
-- `claude:restart-session` → restarts a stopped/crashed session
-- `claude:generate-title(message, cwd?)` → one-shot Haiku query for chat title
+- `claude:restart-session({ sessionId, mcpServers?, cwd?, effort?, model? })` → restarts a stopped/crashed session
+- `claude:generate-title({ message, cwd?, engine?, sessionId? })` → one-shot query for chat title (routes to ACP/Codex via engine param)
 - Events sent to renderer via `claude:event` tagged with `_sessionId`
 - Permission requests sent via `claude:permission_request` with requestId
 
@@ -220,8 +224,8 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 
 **IPC API — Codex Sessions:**
 
-- `codex:start` → spawns Codex process + RPC channel, returns `{ sessionId }`
-- `codex:send` → sends a user message to the active Codex session
+- `codex:start({ cwd, model?, approvalPolicy?, sandbox?, personality?, collaborationMode? })` → spawns Codex process + RPC channel, returns `{ sessionId }`
+- `codex:send({ sessionId, text, images?, effort?, collaborationMode? })` → sends a user message to the active Codex session
 - `codex:stop(sessionId)` → terminates the Codex process
 - `codex:interrupt(sessionId)` → interrupts the current Codex turn
 - `codex:compact(sessionId)` → triggers context compaction for a Codex session
@@ -260,7 +264,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `sessions:save(data)` — writes to `{userData}/openacpui-data/sessions/{projectId}/{id}.json`
 - `sessions:load(projectId, id)` — reads session file
 - `sessions:list(projectId)` — returns session metadata sorted by date
-- `sessions:update-meta` — updates title/lastMessageAt without rewriting messages
+- `sessions:update-meta` — updates session metadata without rewriting messages (fields: `title`, `lastMessageAt`, `pinned`, `folderId`, `branch`)
 - `sessions:delete(projectId, id)` — removes session file
 - `sessions:search({ projectIds, query })` — full-text search across sessions, returns `SearchResult`
 
@@ -275,13 +279,14 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `files:list-all(cwd)` — lists all files including untracked
 - `files:watch(cwd)` / `files:unwatch(cwd)` — start/stop file change watching (emits `files:changed`)
 - `files:calculate-deep-size({ cwd, paths })` — calculates total size of a set of paths
-- `files:read-multiple(cwd, paths)` — batch read with path validation and size limits
+- `files:read-multiple({ cwd, paths, deepPaths? })` — batch read with path validation and size limits; `deepPaths` triggers directory tree expansion
 - `file:read(filePath)` — single file read (used for diff context)
 - `file:rename({ oldPath, newPath })` / `file:trash(filePath)` — file management
 - `file:new-file(filePath)` / `file:new-folder(folderPath)` — create new files/folders
-- `file:open-in-editor({ filePath, line? })` — opens file in external editor (tries cursor, code, zed CLIs with `--goto`, falls back to OS default)
+- `file:open-in-editor({ filePath, line?, editor? })` — opens file in external editor (tries cursor, code, zed CLIs with `--goto`, falls back to OS default; `editor` overrides detection)
 - `shell:open-external(url)` — opens a URL in the default browser
 - `shell:show-item-in-folder(filePath)` — reveals file in OS file manager
+- `browser:set-color-scheme({ targetWebContentsId, colorScheme })` — syncs dark/light mode into a `<webview>` by its webContents id
 
 **IPC API — Terminal (PTY):**
 
@@ -298,6 +303,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 
 - `settings:get` — returns full `AppSettings` object (JSON file in data dir)
 - `settings:set(patch)` — merges partial update, persists to disk, notifies in-process listeners
+- Event `settings:changed` — pushed to renderer after any `settings:set` call
 
 **IPC API — Git:**
 
@@ -317,7 +323,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `git:remove-worktree({ cwd, path, force? })` — remove a git worktree
 - `git:prune-worktrees(cwd)` — prune stale worktree references
 - `git:push(cwd)` / `git:pull(cwd)` / `git:fetch(cwd)` — remote sync
-- `git:generate-commit-message(cwd)` — one-shot SDK query to generate a commit message from staged diff
+- `git:generate-commit-message({ cwd, engine?, sessionId? })` — one-shot query to generate a commit message from staged diff (routes to ACP/Codex via engine param)
 
 **IPC API — MCP Servers:**
 
@@ -355,6 +361,21 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `folders:list(projectId)` — lists folders/subfolders for the folder picker
 - `folders:create({ projectId, name })` / `folders:delete({ projectId, folderId })` / `folders:rename({ projectId, folderId, name })` — folder management
 - `folders:pin({ projectId, folderId, pinned })` — pin/unpin a folder in the sidebar
+
+**IPC API — Auto-Updater:**
+
+- `updater:check` — checks for a new release
+- `updater:download` — downloads a pending update
+- `updater:install` — quits and installs a downloaded update
+- `updater:current-version` — returns the running app version
+- `updater:is-prerelease` — returns whether the current build is a pre-release
+- Events pushed to renderer: `updater:update-available`, `updater:download-progress`, `updater:update-downloaded`, `updater:install-error`, `updater:prerelease-status`
+
+**IPC API — Speech / Mic (main process handlers in `main.ts`):**
+
+- `speech:get-platform` — returns `process.platform` (used to select dictation strategy)
+- `speech:request-mic-permission` — requests microphone access (macOS); returns granted/denied
+- `speech:start-native-dictation` — triggers macOS native dictation UI
 
 ### Settings Architecture
 
@@ -538,6 +559,10 @@ Full Jira board integration via OAuth 2.0 (3-legged flow):
 - **UI**: `JiraBoardPanel.tsx` hosts the board. `src/components/jira/` contains `KanbanBoard.tsx` (column layout with drag-and-drop), `JiraIssueCard.tsx` (compact card), `JiraBoardSetup.tsx` (initial OAuth + board selection). `JiraIssuePreviewOverlay.tsx` shows issue details without leaving the board.
 - **Types**: `shared/types/jira.ts` defines all Jira entities.
 - **Hooks**: `useJiraConfig` (stored config), `useJiraBoardData` (fetch + poll), `useJiraBoard` (full board state + actions).
+
+### Agent Store
+
+`src/components/settings/AgentStore.tsx` provides a marketplace-style settings panel for browsing, installing, and managing agents from the registry. Uses `useAgentStore`, `mergeRegistryAgentUpdate`, and `acp-agent-registry` utilities. Available in Settings → Agent Store.
 
 ### MCP Server Management
 
