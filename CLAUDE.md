@@ -583,7 +583,7 @@ Each Space can have a custom color and icon. `SpaceCustomizer.tsx` provides the 
 
 ### Notification System
 
-`src/lib/notification-utils.ts` triggers OS notifications (via Electron's `Notification` API) when sessions complete or produce output while unfocused. Settings control trigger mode: `always`, `unfocused` (default), or `never`. `src/lib/session-notifications.ts` maps session result events to notification calls. `useNotifications` hook wires this to the active session state.
+`src/lib/notification-utils.ts` triggers OS notifications (via Electron's `Notification` API) when sessions complete or produce output while unfocused. Settings use per-event `NotificationSettings` (in `shared/types/settings.ts`) with separate `osNotification` and `sound` triggers (`"always" | "unfocused" | "never"`) for four events: `sessionComplete`, `exitPlanMode`, `permissions`, and `askUserQuestion`. `src/lib/session-notifications.ts` maps session result events to notification calls and provides `getSessionNotificationActor()` for actor-aware notification messages. `useNotifications` hook wires this to the active session state.
 
 ### Context Window Gauge
 
@@ -620,7 +620,7 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 ### Binary Management
 
 Claude CLI and Codex binaries can be managed downloads or user-provided custom paths:
-- `electron/src/lib/claude-binary.ts` — detects Claude CLI binary: checks `AppSettings.claudeBinaryPath` first, then standard install locations, then managed download path
+- `electron/src/lib/claude-binary.ts` — detects Claude CLI binary: checks `AppSettings.claudeCustomBinaryPath` first, then standard install locations, then managed download path
 - `electron/src/lib/codex-binary.ts` — same pattern for Codex binary
 - Users can configure custom binary paths in Settings → Advanced
 - `prerelease-check.ts` — detects if the current build is a pre-release; `PreReleaseBanner.tsx` shows a dismissible banner in the UI
@@ -715,7 +715,7 @@ Types shared between electron and renderer live in `shared/types/`. Both tsconfi
 - **`src/lib/icon-utils.ts`** — agent icon URL resolution
 - **`src/lib/jira-utils.ts`** — Jira formatting helpers (issue key, priority icons, etc.)
 - **`src/lib/model-utils.ts`** — model name parsing and display normalization
-- **`src/lib/notification-utils.ts`** — OS notification trigger logic (respects `notifyOn: always/unfocused/never`)
+- **`src/lib/notification-utils.ts`** — OS notification trigger logic; per-event `NotificationSettings` with `osNotification`/`sound` triggers (`always/unfocused/never`)
 - **`src/lib/session-notifications.ts`** — maps session events to notification triggers
 - **`src/lib/session/records.ts`** — `UIMessage` and `ChatSession` type guards
 - **`src/lib/session/derived-data.ts`** — computed session stats (token counts, cost summaries)
