@@ -19,7 +19,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 - **Browser**: Electron `<webview>` tag (requires `webviewTag: true` in webPreferences)
 - **Virtualization**: @tanstack/react-virtual (chat message windowing)
 - **State management**: zustand (settings store, localStorage wrapper)
-- **Animation**: motion (v12, formerly framer-motion)
+- **Animation**: motion (v12, formerly framer-motion) + tw-animate-css (Tailwind animation utilities)
 - **Canvas/Annotations**: react-konva + konva (image annotation editor)
 - **Diagrams**: mermaid (MermaidDiagram.tsx)
 - **Code editor**: @monaco-editor/react (Monaco VS Code editor integration)
@@ -28,6 +28,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 - **MCP protocol**: @modelcontextprotocol/sdk (MCP client SDK for server integration)
 - **HTML sanitization**: dompurify (sanitize HTML before rendering)
 - **Syntax highlighting**: refractor (Prism via refractor, used by syntax-highlight.tsx)
+- **Analytics (renderer)**: posthog-js + @posthog/react (PostHogProvider wraps app in main.tsx)
 - **Context menus**: electron-context-menu (right-click context menus in Electron)
 - **Auto-updater**: electron-updater (managed binary auto-update infrastructure)
 - **UI primitives**: radix-ui (direct Radix primitive usage, separate from ShadCN)
@@ -69,7 +70,9 @@ electron/
                 #   mcp-oauth-flow, mcp-oauth-provider, mcp-oauth-store, acp-auth, claude-binary,
                 #   codex-binary, codex-rpc, migration, posthog, updater, glass, terminal-history,
                 #   json-file-store, safe-send, claude-model-cache, acp-utility-prompt,
-                #   codex-utility-prompt, agent-registry, prerelease-check)
+                #   codex-utility-prompt, agent-registry, prerelease-check,
+                #   async-channel.ts — re-export shim for @shared/lib/async-channel; use the
+                #   shared source directly for new code, this shim exists for backward compat)
                 #   └── __tests__/  # Main-process unit tests (sdk, acp-auth, updater, logger, etc.)
 
 src/
@@ -77,7 +80,9 @@ src/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
 │   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
-│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
+│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete,
+│   │                  #   input-bar-utils.ts — file-to-base64/audio placeholder/slash command helpers,
+│   │                  #   constants.ts — AcceptedMediaType, ACCEPTED_IMAGE_TYPES, shared class constants)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
@@ -85,7 +90,10 @@ src/
 │   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
-│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, etc.)
+│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, SplitDropZone,
+│   │                  #   SplitTopRowItem — renders a chat/tool column item in the top row,
+│   │                  #   SplitPaneToolStrip — per-pane tool picker strip,
+│   │                  #   SplitBottomToolIsland — single tool island in the split bottom dock)
 │   ├── welcome/       # Onboarding wizard (WelcomeWizard, 9 step components)
 │   ├── workspace/     # Workspace layout (MainTopToolArea, MainBottomToolDock, RightPanel, ToolIslandContent)
 │   ├── lib/           # Component-local utilities (tool-metadata, tool-formatting, ToolGlyph, chat-layout)
