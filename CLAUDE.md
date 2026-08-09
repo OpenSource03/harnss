@@ -19,7 +19,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 - **Browser**: Electron `<webview>` tag (requires `webviewTag: true` in webPreferences)
 - **Virtualization**: @tanstack/react-virtual (chat message windowing)
 - **State management**: zustand (settings store, localStorage wrapper)
-- **Animation**: motion (v12, formerly framer-motion)
+- **Animation**: motion (v12, formerly framer-motion) + tw-animate-css (Tailwind-compatible animation utilities, used by ShadCN)
 - **Canvas/Annotations**: react-konva + konva (image annotation editor)
 - **Diagrams**: mermaid (MermaidDiagram.tsx)
 - **Code editor**: @monaco-editor/react (Monaco VS Code editor integration)
@@ -383,7 +383,7 @@ Three tiers of settings storage, each suited to different access patterns:
   - `useSessionPersistence` — auto-save with debounce, background store seeding/consuming
   - `useDraftMaterialization` — draft-to-live session transitions for all 3 engines
   - `useSessionRevival` — per-engine revival (reconnecting to existing sessions)
-  - `useMessageQueue` — message queuing and drain for not-yet-ready sessions
+  - `useMessageQueue` — message queuing and drain; drains to both active and background (non-active) sessions so queued messages continue sending after switching away
   - `useSessionCache` — in-memory caches of session message arrays
   - `useSessionCrud` — extracted create/delete/rename operations
   - `useSessionPane` — derives per-pane state (`SessionPaneState`)
@@ -583,7 +583,9 @@ Each Space can have a custom color and icon. `SpaceCustomizer.tsx` provides the 
 
 ### Notification System
 
-`src/lib/notification-utils.ts` triggers OS notifications (via Electron's `Notification` API) when sessions complete or produce output while unfocused. Settings control trigger mode: `always`, `unfocused` (default), or `never`. `src/lib/session-notifications.ts` maps session result events to notification calls. `useNotifications` hook wires this to the active session state.
+`src/lib/notification-utils.ts` triggers OS notifications (via Electron's `Notification` API) when sessions complete or produce output while unfocused. Settings control trigger mode: `always`, `unfocused` (default), or `never`. `src/lib/session-notifications.ts` maps session result events to notification calls. `useNotifications` hook wires this to the active session state. Notifications include the actual agent/model name (e.g. "Claude Sonnet has finished processing") and clicking navigates directly to the session.
+
+**Sidebar unread indicators**: `SessionItem.tsx` shows a pulsing green dot for sessions that finish while inactive (not currently viewed). The dot is cleared the next time that session becomes active/visible. Unread state is tracked in the session type and managed by `useSessionManager`.
 
 ### Context Window Gauge
 
@@ -613,6 +615,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitBottomToolIsland.tsx` — bottom tool island for a split pane
+- `SplitPaneToolStrip.tsx` — vertical tool-picker strip scoped to a split pane
+- `SplitTopRowItem.tsx` — top-row session chip rendered inside a split pane
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
