@@ -75,7 +75,8 @@ electron/
 src/
 ├── components/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
-│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
+│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, BrowserStartPage,
+│   │                  #   browser-types.ts, browser-utils.ts)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
 │   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
@@ -390,6 +391,7 @@ Three tiers of settings storage, each suited to different access patterns:
   - `useSessionRestart` — engine-aware restart-session flow
   - `useSessionSettings` — session-scoped settings derivation
   - `useExtraPaneLoader` — loads sessions for the secondary pane in split mode
+  - Supporting: `hooks/session/types.ts` — shared types/constants for all sub-hooks (`DRAFT_ID`, `StartOptions`, `SharedSessionRefs`, `SharedSessionSetters`, `EngineHooks`, `QueuedMessage`, `SessionPaneBootstrap`, and helper fns `getSelectedPermissionMode`, `getEffectiveClaudePermissionMode`)
 - `useEngineBase` — shared foundation for all engine hooks (state, rAF flush, reset effect); tracks `isCompacting` flag for context compaction in-progress
 - `useClaude` / `useACP` / `useCodex` — engine-specific event handling built on `useEngineBase`
 - `useSpaceTheme` — space color tinting via CSS custom properties
@@ -613,6 +615,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitPaneToolStrip.tsx` — vertical tool-picker icon strip rendered inside each split pane
+- `SplitBottomToolIsland.tsx` — tool island rendered in the split-view bottom dock
+- `SplitTopRowItem.tsx` — single top-row tool column item in split layout
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
@@ -672,7 +677,7 @@ Types shared between electron and renderer live in `shared/types/`. Both tsconfi
 - **`src/types/agents.ts`** — `BackgroundAgent`, `BackgroundAgentActivity`, `BackgroundAgentUsage`. Renderer-only types for tracking background Task agents (status, activity log, live usage metrics, progress summary, current tool).
 - **`shared/types/acp.ts`** — ACP session update discriminated union types.
 - **`shared/types/registry.ts`** — agent registry types (`RegistryAgent`, `RegistryData`).
-- **`shared/types/git.ts`** — git operation types: `GitFileStatus`, `GitBranch`, `GitRepoInfo`, `GitStatus`, `GitLogEntry`, `GitWorktree`.
+- **`shared/types/git.ts`** — git operation types: `GitFileStatus`, `GitFileGroup`, `GitFileChange`, `GitBranch`, `GitRepoInfo`, `GitStatus`, `GitLogEntry`.
 - **`shared/types/jira.ts`** — Jira integration types: `JiraProjectConfig`, `JiraBoard`, `JiraIssue`, `JiraColumn`, `JiraSprint`.
 - **`shared/types/settings.ts`** — `AppSettings` type (notification config, editor/binary preferences, analytics settings, pre-release channel).
 
