@@ -1,9 +1,10 @@
 import { memo, useState, useCallback, useEffect } from "react";
-import { Download, MessageSquare, Code, Mic } from "lucide-react";
+import { Download, MessageSquare, Code, Mic, Languages } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SettingRow, SettingsSelect } from "@/components/settings/shared";
 import type { AppSettings, PreferredEditor, VoiceDictationMode } from "@/types/ui";
+import { useLanguage, type Language } from "@/lib/i18n";
 
 interface GeneralSettingsProps {
   appSettings: AppSettings | null;
@@ -16,6 +17,7 @@ export const GeneralSettings = memo(function GeneralSettings({
   appSettings,
   onUpdateAppSettings,
 }: GeneralSettingsProps) {
+  const { language, setLanguage, t } = useLanguage();
   // Local optimistic state — synced from props once loaded
   const [allowPrerelease, setAllowPrerelease] = useState(true);
   const [chatLimit, setChatLimit] = useState(10);
@@ -68,26 +70,50 @@ export const GeneralSettings = memo(function GeneralSettings({
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="border-b border-foreground/[0.06] px-6 py-4">
-        <h2 className="text-base font-semibold text-foreground">General</h2>
+        <h2 className="text-base font-semibold text-foreground">{t("General")}</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Application-wide preferences
+          {t("Application-wide preferences")}
         </p>
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="px-6 py-2">
+          {/* ── Language section ── */}
+          <div className="py-3">
+            <div className="mb-1 flex items-center gap-2">
+              <Languages className="h-4 w-4 text-muted-foreground" />
+              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {t("Language")}
+              </span>
+            </div>
+
+            <SettingRow
+              label={t("Interface language")}
+              description={t("Choose the language used for Harnss interface labels and settings.")}
+            >
+              <SettingsSelect
+                value={language}
+                onValueChange={(value) => setLanguage(value as Language)}
+                options={[
+                  { value: "en", label: t("English") },
+                  { value: "zh", label: t("Chinese") },
+                ]}
+              />
+            </SettingRow>
+          </div>
+
           {/* ── Updates section ── */}
           <div className="py-3">
             <div className="mb-1 flex items-center gap-2">
               <Download className="h-4 w-4 text-muted-foreground" />
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Updates
+                {t("Updates")}
               </span>
             </div>
 
             <SettingRow
-              label="Include pre-release updates"
-              description="Receive beta versions with the latest features. Disable to only get stable releases."
+              label={t("Include pre-release updates")}
+              description={t("Receive beta versions with the latest features. Disable to only get stable releases.")}
             >
               <Switch
                 checked={allowPrerelease}
@@ -101,13 +127,13 @@ export const GeneralSettings = memo(function GeneralSettings({
             <div className="mb-1 flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-muted-foreground" />
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Sidebar
+                {t("Sidebar")}
               </span>
             </div>
 
             <SettingRow
-              label="Recent chats per project"
-              description="Number of chats shown by default in each project. Click 'Show more' in the sidebar to load additional chats."
+              label={t("Recent chats per project")}
+              description={t("Number of chats shown by default in each project. Click 'Show more' in the sidebar to load additional chats.")}
             >
               <SettingsSelect
                 value={String(chatLimit)}
@@ -122,19 +148,19 @@ export const GeneralSettings = memo(function GeneralSettings({
             <div className="mb-1 flex items-center gap-2">
               <Code className="h-4 w-4 text-muted-foreground" />
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Editor
+                {t("Editor")}
               </span>
             </div>
 
             <SettingRow
-              label="Default editor"
-              description="Choose which editor opens when you click 'Open in Editor'. Auto tries Cursor, VS Code, then Zed."
+              label={t("Default editor")}
+              description={t("Choose which editor opens when you click 'Open in Editor'. Auto tries Cursor, VS Code, then Zed.")}
             >
               <SettingsSelect
                 value={preferredEditor}
                 onValueChange={(v) => handleEditorChange(v as PreferredEditor)}
                 options={[
-                  { value: "auto", label: "Auto" },
+                  { value: "auto", label: t("Auto") },
                   { value: "cursor", label: "Cursor" },
                   { value: "code", label: "VS Code" },
                   { value: "zed", label: "Zed" },
@@ -148,20 +174,20 @@ export const GeneralSettings = memo(function GeneralSettings({
             <div className="mb-1 flex items-center gap-2">
               <Mic className="h-4 w-4 text-muted-foreground" />
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Voice Dictation
+                {t("Voice Dictation")}
               </span>
             </div>
 
             <SettingRow
-              label="Dictation mode"
-              description="Native uses your OS dictation (macOS only). Whisper runs a local AI model for speech-to-text on all platforms (~40 MB download on first use)."
+              label={t("Dictation mode")}
+              description={t("Native uses your OS dictation (macOS only). Whisper runs a local AI model for speech-to-text on all platforms (~40 MB download on first use).")}
             >
               <SettingsSelect
                 value={voiceDictation}
                 onValueChange={(v) => handleVoiceDictationChange(v as VoiceDictationMode)}
                 options={[
-                  { value: "native", label: "Native (OS)" },
-                  { value: "whisper", label: "Whisper (Local AI)" },
+                  { value: "native", label: t("Native (OS)") },
+                  { value: "whisper", label: t("Whisper (Local AI)") },
                 ]}
               />
             </SettingRow>

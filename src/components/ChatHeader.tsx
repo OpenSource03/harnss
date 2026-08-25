@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isMac } from "@/lib/utils";
 import type { AcpPermissionBehavior } from "@/types";
+import { useLanguage } from "@/lib/i18n";
 
 const PERMISSION_MODE_LABELS: Record<string, string> = {
   plan: "Plan",
@@ -54,6 +55,7 @@ export const ChatHeader = memo(function ChatHeader({
   onSeedDevExampleConversation,
   onSeedDevExampleSpaceData,
 }: ChatHeaderProps) {
+  const { t } = useLanguage();
   const modeLabel = permissionMode ? PERMISSION_MODE_LABELS[permissionMode] : null;
   const acpBehaviorLabel = acpPermissionBehavior
     ? ACP_PERMISSION_BEHAVIOR_LABELS[acpPermissionBehavior]
@@ -63,11 +65,11 @@ export const ChatHeader = memo(function ChatHeader({
 
   // Collect all session detail rows for the unified tooltip
   const detailRows: { label: string; value: string }[] = [];
-  if (model) detailRows.push({ label: "Model", value: model });
-  detailRows.push({ label: "Plan", value: planMode ? "On" : "Off" });
-  if (permissionDisplay) detailRows.push({ label: "Permissions", value: permissionDisplay });
-  if (totalCost > 0) detailRows.push({ label: "Cost", value: `$${totalCost.toFixed(4)}` });
-  if (sessionId) detailRows.push({ label: "Session", value: sessionId });
+  if (model) detailRows.push({ label: t("Model"), value: model });
+  detailRows.push({ label: t("Plan"), value: planMode ? "On" : "Off" });
+  if (permissionDisplay) detailRows.push({ label: t("Permissions"), value: permissionDisplay });
+  if (totalCost > 0) detailRows.push({ label: t("Cost"), value: `$${totalCost.toFixed(4)}` });
+  if (sessionId) detailRows.push({ label: t("Session"), value: sessionId });
 
   const hasDetails = detailRows.length > 0;
   const showDevSeedButton = import.meta.env.DEV && !!showDevFill && !!onSeedDevExampleConversation;
@@ -106,13 +108,13 @@ export const ChatHeader = memo(function ChatHeader({
               <div className="space-y-0.5 text-xs">
                 {model && (
                   <div className="flex justify-between gap-4">
-                    <span className="opacity-70">Model</span>
+                    <span className="opacity-70">{t("Model")}</span>
                     <span className="font-mono">{model}</span>
                   </div>
                 )}
                 {permissionDisplay && (
                   <div className="flex justify-between gap-4">
-                    <span className="opacity-70">Permissions</span>
+                    <span className="opacity-70">{t("Permissions")}</span>
                     <span className="font-mono">{permissionDisplay}</span>
                   </div>
                 )}

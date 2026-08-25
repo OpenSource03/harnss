@@ -4,6 +4,7 @@ import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SettingRow, SettingsSelect } from "@/components/settings/shared";
 import type { ThemeOption } from "@/types";
+import { useLanguage } from "@/lib/i18n";
 
 // ── Props ──
 
@@ -49,13 +50,14 @@ export const AppearanceSettings = memo(function AppearanceSettings({
   onTransparencyChange,
   glassSupported,
 }: AppearanceSettingsProps) {
+  const { t } = useLanguage();
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="border-b border-foreground/[0.06] px-6 py-4">
-        <h2 className="text-base font-semibold text-foreground">Appearance</h2>
+        <h2 className="text-base font-semibold text-foreground">{t("Appearance")}</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Customize the look and feel of the interface
+          {t("Customize the look and feel of the interface")}
         </p>
       </div>
 
@@ -66,21 +68,21 @@ export const AppearanceSettings = memo(function AppearanceSettings({
             <div className="mb-1 flex items-center gap-2">
               <SunMoon className="h-4 w-4 text-muted-foreground" />
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Theme
+                {t("Theme")}
               </span>
             </div>
 
             <SettingRow
-              label="Color theme"
-              description="Choose between light and dark appearance, or follow your system setting."
+              label={t("Color theme")}
+              description={t("Choose between light and dark appearance, or follow your system setting.")}
             >
               <SettingsSelect
                 value={theme}
                 onValueChange={(v) => onThemeChange(v as ThemeOption)}
                 options={[
-                  { value: "dark", label: "Dark" },
-                  { value: "light", label: "Light" },
-                  { value: "system", label: "System" },
+                  { value: "dark", label: t("Dark") },
+                  { value: "light", label: t("Light") },
+                  { value: "system", label: t("System") },
                 ]}
               />
             </SettingRow>
@@ -91,13 +93,13 @@ export const AppearanceSettings = memo(function AppearanceSettings({
             <div className="mb-1 flex items-center gap-2">
               <Wrench className="h-4 w-4 text-muted-foreground" />
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Tools
+                {t("Tools")}
               </span>
             </div>
 
             <SettingRow
-              label="Auto-group tools"
-              description="Collapse consecutive tool calls into a single group. Disable to keep every tool call and in-between thinking row visible on its own."
+              label={t("Auto-group tools")}
+              description={t("Collapse consecutive tool calls into a single group. Disable to keep every tool call and in-between thinking row visible on its own.")}
             >
               <Switch
                 checked={autoGroupTools}
@@ -106,8 +108,8 @@ export const AppearanceSettings = memo(function AppearanceSettings({
             </SettingRow>
 
             <SettingRow
-              label="Avoid grouping edits"
-              description="Treat Edit and Write tool calls as standalone rows, even when auto-grouping is enabled. Reads before and after an edit will form separate groups."
+              label={t("Avoid grouping edits")}
+              description={t("Treat Edit and Write tool calls as standalone rows, even when auto-grouping is enabled. Reads before and after an edit will form separate groups.")}
             >
               <Switch
                 checked={avoidGroupingEdits}
@@ -117,8 +119,8 @@ export const AppearanceSettings = memo(function AppearanceSettings({
             </SettingRow>
 
             <SettingRow
-              label="Auto-expand tool results"
-              description="Temporarily expand completed tool calls, then collapse them again after a short delay. Disable to keep tool rows stable unless you open them yourself."
+              label={t("Auto-expand tool results")}
+              description={t("Temporarily expand completed tool calls, then collapse them again after a short delay. Disable to keep tool rows stable unless you open them yourself.")}
             >
               <Switch
                 checked={autoExpandTools}
@@ -133,14 +135,14 @@ export const AppearanceSettings = memo(function AppearanceSettings({
             <div className="mb-1 flex items-center gap-2">
               <Layout className="h-4 w-4 text-muted-foreground" />
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Layout
+                {t("Layout")}
               </span>
             </div>
 
             <div className="py-3">
-              <p className="text-sm font-medium text-foreground">Window layout</p>
+              <p className="text-sm font-medium text-foreground">{t("Window layout")}</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Choose how panels are arranged in the window.
+                {t("Choose how panels are arranged in the window.")}
               </p>
               <div className="mt-3 flex gap-3">
                 {/* ── Island preview ── */}
@@ -178,7 +180,7 @@ export const AppearanceSettings = memo(function AppearanceSettings({
                   <p className={`mt-2 text-center text-xs font-medium ${
                     islandLayout ? "text-primary" : "text-muted-foreground"
                   }`}>
-                    Islands
+                    {t("Islands")}
                   </p>
                 </button>
 
@@ -224,15 +226,15 @@ export const AppearanceSettings = memo(function AppearanceSettings({
                   <p className={`mt-2 text-center text-xs font-medium ${
                     !islandLayout ? "text-primary" : "text-muted-foreground"
                   }`}>
-                    Flat
+                    {t("Flat")}
                   </p>
                 </button>
               </div>
             </div>
 
             <SettingRow
-              label="Colored sidebar icons"
-              description="Tint tool picker and panel header icons with per-tool colors. Disable for neutral monochrome icons."
+              label={t("Colored sidebar icons")}
+              description={t("Tint tool picker and panel header icons with per-tool colors. Disable for neutral monochrome icons.")}
             >
               <Switch
                 checked={coloredSidebarIcons}
@@ -246,16 +248,16 @@ export const AppearanceSettings = memo(function AppearanceSettings({
             <div className="mb-1 flex items-center gap-2">
               <Blend className="h-4 w-4 text-muted-foreground" />
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Transparency
+                {t("Transparency")}
               </span>
             </div>
 
             <SettingRow
-              label="Window transparency"
+              label={t("Window transparency")}
               description={
                 glassSupported
-                  ? "Allow the desktop to show through the window background. Uses Liquid Glass on macOS or Mica on Windows."
-                  : "Window transparency is not available on this platform."
+                  ? t("Allow the desktop to show through the window background. Uses Liquid Glass on macOS or Mica on Windows.")
+                  : t("Window transparency is not available on this platform.")
               }
             >
               <Switch

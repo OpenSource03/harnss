@@ -14,6 +14,7 @@ import { Pencil, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { resolveLucideIcon } from "@/lib/icon-utils";
 import type { Space } from "@/types";
+import { useLanguage } from "@/lib/i18n";
 
 interface SpaceBarProps {
   spaces: Space[];
@@ -58,6 +59,7 @@ export const SpaceBar = memo(function SpaceBar({
   onDropProject,
   onOpenSettings,
 }: SpaceBarProps) {
+  const { t } = useLanguage();
   const sorted = [...spaces].sort((a, b) => a.order - b.order);
   const [contextSpace, setContextSpace] = useState<Space | null>(null);
   const [contextPos, setContextPos] = useState({ x: 0, y: 0 });
@@ -132,7 +134,7 @@ export const SpaceBar = memo(function SpaceBar({
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
-          Settings
+          {t("Settings")}
         </TooltipContent>
       </Tooltip>
       {/* Center group — flex row: [◂] [masked scroll area] [▸].
@@ -194,7 +196,7 @@ export const SpaceBar = memo(function SpaceBar({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs">
-                    {space.name}
+                    <span data-no-translate>{space.name}</span>
                   </TooltipContent>
                 </Tooltip>
               );
@@ -224,7 +226,7 @@ export const SpaceBar = memo(function SpaceBar({
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
-          New space
+          {t("New space")}
         </TooltipContent>
       </Tooltip>
 
@@ -248,7 +250,7 @@ export const SpaceBar = memo(function SpaceBar({
         >
           <DropdownMenuItem onClick={() => { if (contextSpace) onEditSpace(contextSpace); closeContext(); }}>
             <Pencil className="me-2 h-3.5 w-3.5" />
-            Edit
+            {t("Edit")}
           </DropdownMenuItem>
           {contextSpace?.id !== "default" && (
             <DropdownMenuItem
@@ -256,7 +258,7 @@ export const SpaceBar = memo(function SpaceBar({
               onClick={() => { if (contextSpace) setDeleteSpace(contextSpace); closeContext(); }}
             >
               <Trash2 className="me-2 h-3.5 w-3.5" />
-              Delete
+            {t("Delete")}
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -267,15 +269,15 @@ export const SpaceBar = memo(function SpaceBar({
         open={deleteSpace !== null}
         onOpenChange={(open) => !open && setDeleteSpace(null)}
         onConfirm={() => { if (deleteSpace) onDeleteSpace(deleteSpace.id); }}
-        title="Delete Space"
+        title={t("Delete Space")}
         description={
           <>
-            Are you sure you want to delete{" "}
+            {t("Are you sure you want to delete")}{" "}
             <span className="font-medium text-foreground">{deleteSpace?.name}</span>?
-            Projects in this space will be moved to General.
+            {t("Projects in this space will be moved to General.")}
           </>
         }
-        confirmLabel="Delete"
+        confirmLabel={t("Delete")}
       />
     </div>
   );

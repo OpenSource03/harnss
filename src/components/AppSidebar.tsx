@@ -9,6 +9,7 @@ import { SidebarSearch } from "./SidebarSearch";
 import { SpaceBar } from "./SpaceBar";
 import { UpdateBanner } from "./UpdateBanner";
 import { ProjectSection } from "./sidebar/ProjectSection";
+import { useLanguage } from "@/lib/i18n";
 
 interface AppSidebarProps {
   isOpen: boolean;
@@ -73,6 +74,7 @@ export const AppSidebar = memo(function AppSidebar({
   onOpenSettings,
   agents,
 }: AppSidebarProps) {
+  const { t } = useLanguage();
   // Load default chat limit from main-process settings
   const [defaultChatLimit, setDefaultChatLimit] = useState(10);
   useEffect(() => {
@@ -199,7 +201,7 @@ export const AppSidebar = memo(function AppSidebar({
           className="no-drag flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-medium text-sidebar-foreground/70 transition-all hover:bg-black/5 hover:text-sidebar-foreground dark:hover:bg-white/10"
         >
           <Plus className="h-3.5 w-3.5 shrink-0" />
-          <span>Add project</span>
+          <span>{t("Add project")}</span>
         </button>
       </div>
 
@@ -258,8 +260,8 @@ export const AppSidebar = memo(function AppSidebar({
             {filteredProjects.length === 0 && (
               <p className="px-2 py-8 text-center text-xs text-sidebar-foreground/50">
                 {projects.length === 0
-                  ? "Add a project to get started"
-                  : "No projects in this space"}
+                  ? t("Add a project to get started")
+                  : t("No projects in this space")}
               </p>
             )}
           </div>
@@ -269,7 +271,7 @@ export const AppSidebar = memo(function AppSidebar({
       <UpdateBanner />
 
       <div className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] text-sidebar-foreground/40">
-        <span>Harnss is in early beta</span>
+        <span>{t("Harnss is in early beta")}</span>
         <span className="text-sidebar-foreground/20">·</span>
         <a
           href="https://github.com/OpenSource03/harnss/issues"
@@ -278,7 +280,7 @@ export const AppSidebar = memo(function AppSidebar({
           className="inline-flex items-center gap-1 text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground/80"
         >
           <Bug className="h-3 w-3" />
-          <span>Report a bug</span>
+          <span>{t("Report a bug")}</span>
         </a>
       </div>
 

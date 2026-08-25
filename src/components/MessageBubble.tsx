@@ -207,7 +207,7 @@ export const MessageBubble = memo(function MessageBubble({
       )}>
         <div className="inline-flex items-center gap-1.5">
           {isError ? <AlertCircle className="h-3 w-3" /> : <Info className="h-3 w-3" />}
-          {message.content}
+          <span data-no-translate>{message.content}</span>
         </div>
       </div>
     );
@@ -244,7 +244,7 @@ export const MessageBubble = memo(function MessageBubble({
                   open={!!viewingImage}
                   onOpenChange={(isOpen) => { if (!isOpen) setViewingImage(null); }}
                 />
-                {renderWithMentions(displayContent)}
+                <span data-no-translate>{renderWithMentions(displayContent)}</span>
                 {message.isQueued && (
                   <div className="mt-2 flex items-center gap-2 border-t border-foreground/[0.06] pt-2 text-[11px] text-muted-foreground">
                     <Clock className="h-3 w-3 shrink-0" />
@@ -334,7 +334,7 @@ export const MessageBubble = memo(function MessageBubble({
     <div className={`flex justify-start px-4 ${isContinuation ? "py-0.5" : "py-1.5"}`}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="flow-root min-w-0 max-w-[85%] wrap-break-word">
+        <div className="flow-root min-w-0 max-w-[85%] wrap-break-word">
             {showThinking && message.thinking && (
               <div className={message.content ? "mb-2" : undefined}>
                 <ThinkingBlock
@@ -348,6 +348,7 @@ export const MessageBubble = memo(function MessageBubble({
               <div
                 ref={proseRef}
                 className="flow-root prose dark:prose-invert prose-sm max-w-none text-foreground [&_li::marker]:text-foreground dark:[&_li::marker]:text-foreground/70"
+                data-no-translate
               >
                 <IsStreamingMarkdownContext.Provider value={!!message.isStreaming}>
                   <ReactMarkdown

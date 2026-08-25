@@ -34,6 +34,7 @@ import { IconPicker } from "@/components/IconPicker";
 import type { ChatSession, InstalledAgent, Project, Space } from "@/types";
 import { SessionItem } from "./SessionItem";
 import { CCSessionList } from "./CCSessionList";
+import { useLanguage } from "@/lib/i18n";
 
 interface SessionGroup {
   label: string;
@@ -121,6 +122,7 @@ export function ProjectSection({
   defaultChatLimit: number;
   agents?: InstalledAgent[];
 }) {
+  const { t } = useLanguage();
   const [expanded, setExpanded] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(project.name);
@@ -148,7 +150,10 @@ export function ProjectSection({
   const hasMore = sortedSessions.length > visibleCount;
   const remainingCount = sortedSessions.length - visibleCount;
 
-  const groups = useMemo(() => groupSessionsByDate(visibleSessions), [visibleSessions]);
+  const groups = useMemo(
+    () => groupSessionsByDate(visibleSessions).map((group) => ({ ...group, label: t(group.label) })),
+    [visibleSessions, t],
+  );
 
   const handleRename = () => {
     const trimmed = editName.trim();
@@ -224,7 +229,7 @@ export function ProjectSection({
           ) : (
             <FolderOpen className="h-4 w-4 shrink-0 text-sidebar-foreground/60" />
           )}
-          <span className="min-w-0 truncate">{project.name}</span>
+          <span className="min-w-0 truncate" data-no-translate>{project.name}</span>
         </button>
 
         {jiraBoardEnabled && (

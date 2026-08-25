@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react";
 import { Search, MessageSquare, Hash, X } from "lucide-react";
 import type { SearchMessageResult, SearchSessionResult } from "@/types";
+import { useLanguage } from "@/lib/i18n";
 
 interface SidebarSearchProps {
   projectIds: string[];
@@ -13,6 +14,7 @@ export const SidebarSearch = memo(function SidebarSearch({
   onNavigateToMessage,
   onSelectSession,
 }: SidebarSearchProps) {
+  const { t } = useLanguage();
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const [messageResults, setMessageResults] = useState<SearchMessageResult[]>([]);
@@ -108,7 +110,7 @@ export const SidebarSearch = memo(function SidebarSearch({
           }}
           onFocus={() => setIsOpen(true)}
           onKeyDown={handleKeyDown}
-          placeholder="Search chats..."
+          placeholder={t("Search chats...")}
           className="w-full bg-black/5 py-1.5 pe-8 ps-9 text-[13px] text-sidebar-foreground placeholder:text-sidebar-foreground/40 outline-none transition-colors focus:bg-black/10 dark:bg-white/5 dark:focus:bg-white/10"
         />
         {query && (
@@ -127,18 +129,18 @@ export const SidebarSearch = memo(function SidebarSearch({
       {showDropdown && (
         <div className="absolute inset-x-3 top-full z-50 mt-1 max-h-80 overflow-y-auto rounded-xl border border-sidebar-border bg-popover p-1.5 shadow-xl glass-outline" style={{ "--island-fill": "var(--popover)" } as React.CSSProperties}>
           {isSearching && (
-            <p className="px-2 py-3 text-center text-xs text-muted-foreground">Searching...</p>
+            <p className="px-2 py-3 text-center text-xs text-muted-foreground">{t("Searching")}...</p>
           )}
 
           {!isSearching && !hasResults && (
-            <p className="px-2 py-3 text-center text-xs text-muted-foreground">No results found</p>
+            <p className="px-2 py-3 text-center text-xs text-muted-foreground">{t("No results found")}</p>
           )}
 
           {/* Session results */}
           {sessionResults.length > 0 && (
             <div className="mb-1">
               <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                Chats
+                {t("Chats")}
               </p>
               {sessionResults.map((r) => (
                 <button
@@ -163,7 +165,7 @@ export const SidebarSearch = memo(function SidebarSearch({
           {messageResults.length > 0 && (
             <div>
               <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                Messages
+                {t("Messages")}
               </p>
               {messageResults.map((r, i) => (
                 <button

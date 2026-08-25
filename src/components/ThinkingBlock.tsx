@@ -10,6 +10,7 @@ import {
   advanceThinkingAnimationState,
   createThinkingAnimationState,
 } from "@/lib/thinking-animation";
+import { useLanguage } from "@/lib/i18n";
 
 interface ThinkingBlockProps {
   thinking: string;
@@ -18,6 +19,7 @@ interface ThinkingBlockProps {
 }
 
 export function ThinkingBlock({ thinking, isStreaming, thinkingComplete }: ThinkingBlockProps) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   // Tracks whether user manually scrolled up in the inner thinking div
@@ -71,10 +73,10 @@ export function ThinkingBlock({ thinking, isStreaming, thinkingComplete }: Think
         <Minus className={`h-3 w-3 ${isThinking ? "text-foreground/40" : "text-foreground/30"}`} />
         {isThinking ? (
           <TextShimmer as="span" className="italic opacity-60" duration={1.8} spread={1.5}>
-            Thinking...
+            {t("Thinking...")}
           </TextShimmer>
         ) : (
-          <span className="italic text-foreground/40">Thought</span>
+          <span className="italic text-foreground/40">{t("Thought")}</span>
         )}
       </CollapsibleTrigger>
       {/* Only render expandable content when there's actual thinking text */}
@@ -83,6 +85,7 @@ export function ThinkingBlock({ thinking, isStreaming, thinkingComplete }: Think
           <div
             ref={contentRef}
             onScroll={handleScroll}
+            data-no-translate
             className="mt-1 mb-2 max-h-60 overflow-auto border-s-2 border-foreground/10 ps-3 py-1 text-xs text-foreground/40 whitespace-pre-wrap"
           >
             {animationState.baseText}

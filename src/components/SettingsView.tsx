@@ -27,6 +27,7 @@ import { AnalyticsSettings } from "@/components/settings/AnalyticsSettings";
 import { isMac } from "@/lib/utils";
 import type { InstalledAgent, ThemeOption } from "@/types";
 import type { AppSettings } from "@/types/ui";
+import { useLanguage } from "@/lib/i18n";
 
 // ── Section definitions ──
 
@@ -112,6 +113,7 @@ export const SettingsView = memo(function SettingsView({
   onToggleSidebar,
   onReplayWelcome,
 }: SettingsViewProps) {
+  const { t } = useLanguage();
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const macIslandTitlebarOffsetClass = "";
 
@@ -256,7 +258,7 @@ export const SettingsView = memo(function SettingsView({
             <PanelLeft className="h-4 w-4" />
           </Button>
         )}
-        <span className={`leading-none text-sm font-semibold text-foreground ${macIslandTitlebarOffsetClass}`}>Settings</span>
+        <span className={`leading-none text-sm font-semibold text-foreground ${macIslandTitlebarOffsetClass}`}>{t("Settings")}</span>
       </div>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -278,10 +280,10 @@ export const SettingsView = memo(function SettingsView({
                   }`}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
-                  <span className="flex-1">{item.label}</span>
+                  <span className="flex-1">{t(item.label)}</span>
                   {item.comingSoon && (
                     <span className="rounded bg-foreground/[0.06] px-1.5 py-px text-[10px] font-medium text-muted-foreground/70">
-                      Soon
+                      {t("Soon")}
                     </span>
                   )}
                 </button>

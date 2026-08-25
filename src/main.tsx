@@ -4,6 +4,7 @@ import { PostHogProvider } from "@posthog/react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { migrateLocalStorage } from "./lib/local-storage-migration";
 import { initPostHog, posthog } from "./lib/posthog";
+import { LanguageProvider } from "./lib/i18n";
 import { App } from "./App";
 import "./index.css";
 
@@ -20,7 +21,9 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <PostHogProvider client={posthog}>
       <ErrorBoundary>
-        <App />
+        <LanguageProvider>
+          <App />
+        </LanguageProvider>
       </ErrorBoundary>
     </PostHogProvider>
   </StrictMode>,
