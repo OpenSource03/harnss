@@ -31,6 +31,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 - **Context menus**: electron-context-menu (right-click context menus in Electron)
 - **Auto-updater**: electron-updater (managed binary auto-update infrastructure)
 - **UI primitives**: radix-ui (direct Radix primitive usage, separate from ShadCN)
+- **CSS animations**: tw-animate-css (Tailwind animation utilities)
 - **Package manager**: pnpm
 - **Path aliases**: `@/` → `./src/`, `@shared/` → `./shared/`
 
@@ -75,17 +76,20 @@ electron/
 src/
 ├── components/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
-│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
+│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance,
+│   │                  #   BrowserStartPage, browser-types.ts, browser-utils.ts)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
-│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
+│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete,
+│   │                  #   constants.ts, input-bar-utils.ts)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
-│   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
+│   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus, mcp-utils.ts)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
 │   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
 │   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
-│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, etc.)
+│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, SplitDropZone,
+│   │                  #   SplitTopRowItem, SplitPaneToolStrip, SplitBottomToolIsland)
 │   ├── welcome/       # Onboarding wizard (WelcomeWizard, 9 step components)
 │   ├── workspace/     # Workspace layout (MainTopToolArea, MainBottomToolDock, RightPanel, ToolIslandContent)
 │   ├── lib/           # Component-local utilities (tool-metadata, tool-formatting, ToolGlyph, chat-layout)
@@ -613,6 +617,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitTopRowItem.tsx` — renders a single item (chat pane or tool column) in the split top row; extracted from AppLayout
+- `SplitPaneToolStrip.tsx` — vertical tool strip for individual split panes
+- `SplitBottomToolIsland.tsx` — renders a single tool island in the split-view bottom dock; extracted from AppLayout
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
