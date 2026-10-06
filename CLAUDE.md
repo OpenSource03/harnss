@@ -6,7 +6,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 
 - **Runtime**: Electron 40 (main process) + React 19 (renderer)
 - **Build**: Vite 7, TypeScript 5.9, tsup (electron TS→JS), electron-builder (cross-platform packaging)
-- **Testing**: vitest (unit tests for hooks, lib utilities, and electron modules; config: `vitest.config.electron.ts`)
+- **Testing**: vitest (unit tests for hooks, lib utilities, components, and electron modules; config: `vitest.config.electron.ts`; test files co-located alongside source in `src/` and `electron/src/lib/__tests__/`)
 - **Styling**: Tailwind CSS v4 + ShadCN UI (includes Preflight — no CSS resets needed)
 - **UI Components**: ShadCN (Button, Badge, ScrollArea, Tooltip, Collapsible, Separator, DropdownMenu, Avatar)
 - **Icons**: lucide-react
@@ -146,6 +146,7 @@ src/
 ├── stores/            # Zustand stores (settings-store.ts — localStorage wrapper)
 └── types/             # Renderer-side types (protocol, ui, session, spaces, attachments, tools,
                        #   mcp, permissions, search, tool-islands, agents, window.d.ts) + re-export shims for shared/
+                       #   codex-protocol/ — renderer-local copy of generated Codex protocol types
 ```
 
 ## How to Run
@@ -201,6 +202,8 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `claude:generate-title(message, cwd?)` → one-shot Haiku query for chat title
 - Events sent to renderer via `claude:event` tagged with `_sessionId`
 - Permission requests sent via `claude:permission_request` with requestId
+- `claude:exit` — emitted when the CLI process exits (includes exit code)
+- `claude:stderr` — stderr output from the CLI process
 
 **IPC API — ACP Sessions:**
 
@@ -217,6 +220,8 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `acp:get-available-commands(sessionId)` → returns available slash commands for a session
 - `acp:permission_response({ sessionId, requestId, optionId })` → responds to an ACP permission prompt
 - Events sent to renderer via `acp:event` tagged with `_sessionId`
+- `acp:turn_complete` — emitted when an ACP turn finishes (separate from the event stream)
+- `acp:exit` — ACP process exit event
 
 **IPC API — Codex Sessions:**
 
@@ -237,6 +242,8 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `codex:auth-status` → returns Codex authentication status
 - `codex:version` → returns the Codex binary version string
 - `codex:binary-status` → returns binary detection status
+- `codex:approval_request` — event sent to renderer when Codex requests tool approval
+- `codex:exit` — Codex process exit event
 
 **IPC API — Agent Registry:**
 
@@ -298,6 +305,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 
 - `settings:get` — returns full `AppSettings` object (JSON file in data dir)
 - `settings:set(patch)` — merges partial update, persists to disk, notifies in-process listeners
+- `settings:changed` — event emitted to renderer after a `settings:set` update is applied
 
 **IPC API — Git:**
 
@@ -355,6 +363,36 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `folders:list(projectId)` — lists folders/subfolders for the folder picker
 - `folders:create({ projectId, name })` / `folders:delete({ projectId, folderId })` / `folders:rename({ projectId, folderId, name })` — folder management
 - `folders:pin({ projectId, folderId, pinned })` — pin/unpin a folder in the sidebar
+
+**IPC API — Updater** (registered in `electron/src/lib/updater.ts` and `prerelease-check.ts`):
+
+- `updater:check` — manually triggers an update check
+- `updater:download` — starts downloading the available update
+- `updater:install` — quits and installs the downloaded update
+- `updater:current-version` — returns the current app version string
+- `updater:is-prerelease` — returns `{ isPreRelease, version, releaseUrl }`
+- `updater:update-available` — event: an update was found
+- `updater:download-progress` — event: download progress
+- `updater:update-downloaded` — event: download complete, ready to install
+- `updater:install-error` — event: error during install
+- `updater:prerelease-status` — event: pre-release detection result
+
+**IPC API — App / Window / Glass / Speech** (registered in `electron/src/main.ts`):
+
+- `app:getGlassSupported` — returns whether liquid glass is supported
+- `app:get-mac-background-effect-support` — returns macOS background effect support info
+- `app:set-theme-source` — sets `nativeTheme.themeSource`
+- `app:set-mac-background-effect` — sets macOS transparency effect style
+- `app:relaunch` — restarts the Electron app
+- `app:set-min-width` — sets window minimum width
+- `glass:set-tint-color` — sets glass tint color
+- `glass:set-theme` — syncs glass theme
+- `clipboard:write-text` — writes text to the system clipboard
+- `browser:set-color-scheme` — sets color scheme on a specific webContents (for `<webview>`)
+- `analytics:capture` — forwards analytics events from renderer to main-process PostHog
+- `speech:start-native-dictation` — starts OS native dictation
+- `speech:get-platform` — returns `process.platform`
+- `speech:request-mic-permission` — requests microphone permission (macOS `systemPreferences`)
 
 ### Settings Architecture
 
