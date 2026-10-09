@@ -275,7 +275,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `files:list-all(cwd)` — lists all files including untracked
 - `files:watch(cwd)` / `files:unwatch(cwd)` — start/stop file change watching (emits `files:changed`)
 - `files:calculate-deep-size({ cwd, paths })` — calculates total size of a set of paths
-- `files:read-multiple(cwd, paths)` — batch read with path validation and size limits
+- `files:read-multiple(cwd, paths, deepPaths?)` — batch read with path validation and size limits; `deepPaths` optionally specifies paths to expand as directory trees
 - `file:read(filePath)` — single file read (used for diff context)
 - `file:rename({ oldPath, newPath })` / `file:trash(filePath)` — file management
 - `file:new-file(filePath)` / `file:new-folder(folderPath)` — create new files/folders
@@ -317,7 +317,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `git:remove-worktree({ cwd, path, force? })` — remove a git worktree
 - `git:prune-worktrees(cwd)` — prune stale worktree references
 - `git:push(cwd)` / `git:pull(cwd)` / `git:fetch(cwd)` — remote sync
-- `git:generate-commit-message(cwd)` — one-shot SDK query to generate a commit message from staged diff
+- `git:generate-commit-message({ cwd, engine?, sessionId? })` — one-shot query to generate a commit message from staged diff; `engine`/`sessionId` select the active engine (defaults to Claude)
 
 **IPC API — MCP Servers:**
 
@@ -527,7 +527,7 @@ Tool name normalization: `extractMcpToolName(toolName)` strips the `"mcp__Server
 
 **Git Panel** (`src/components/git/`): Decomposed into 9 components — `GitPanel` (orchestrator), `RepoSection` (repo header + branch), `BranchPicker` (branch switcher popover), `ChangesSection` (staged/unstaged file list), `CommitInput` (message + commit button), `FileItem` (individual file row), `InlineDiff` (per-file diff preview), `InlineSelector` (hunk-level staging UI), `git-panel-utils.ts` (formatting helpers).
 
-**Commit message generation**: `oneShotSdkQuery()` calls a one-shot Claude Haiku query with the staged diff to generate a commit message. Exposed as `git:generate-commit-message(cwd)`.
+**Commit message generation**: `oneShotSdkQuery()` calls a one-shot Claude Haiku query with the staged diff to generate a commit message. Exposed as `git:generate-commit-message({ cwd, engine?, sessionId? })`.
 
 ### Jira Integration
 
