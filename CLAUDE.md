@@ -198,7 +198,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `claude:version` → returns the Claude CLI version string
 - `claude:binary-status` → returns binary detection status (found path or error)
 - `claude:restart-session` → restarts a stopped/crashed session
-- `claude:generate-title(message, cwd?)` → one-shot Haiku query for chat title
+- `claude:generate-title({ message, cwd?, engine?, sessionId? })` → one-shot title query; dispatches to ACP (`acpUtilityPrompt`) or Codex (`codexUtilityPrompt`) when `engine` is set, otherwise Claude Haiku
 - Events sent to renderer via `claude:event` tagged with `_sessionId`
 - Permission requests sent via `claude:permission_request` with requestId
 
@@ -317,7 +317,7 @@ The main process uses `@anthropic-ai/claude-agent-sdk` (ESM-only, loaded via `aw
 - `git:remove-worktree({ cwd, path, force? })` — remove a git worktree
 - `git:prune-worktrees(cwd)` — prune stale worktree references
 - `git:push(cwd)` / `git:pull(cwd)` / `git:fetch(cwd)` — remote sync
-- `git:generate-commit-message(cwd)` — one-shot SDK query to generate a commit message from staged diff
+- `git:generate-commit-message({ cwd, engine?, sessionId? })` — one-shot query to generate a commit message from staged diff; dispatches to ACP or Codex when `engine` is set
 
 **IPC API — MCP Servers:**
 
@@ -527,7 +527,7 @@ Tool name normalization: `extractMcpToolName(toolName)` strips the `"mcp__Server
 
 **Git Panel** (`src/components/git/`): Decomposed into 9 components — `GitPanel` (orchestrator), `RepoSection` (repo header + branch), `BranchPicker` (branch switcher popover), `ChangesSection` (staged/unstaged file list), `CommitInput` (message + commit button), `FileItem` (individual file row), `InlineDiff` (per-file diff preview), `InlineSelector` (hunk-level staging UI), `git-panel-utils.ts` (formatting helpers).
 
-**Commit message generation**: `oneShotSdkQuery()` calls a one-shot Claude Haiku query with the staged diff to generate a commit message. Exposed as `git:generate-commit-message(cwd)`.
+**Commit message generation**: `oneShotSdkQuery()` calls a one-shot Claude Haiku query with the staged diff to generate a commit message. Exposed as `git:generate-commit-message(cwd, engine?, sessionId?)`. When `engine` is `"acp"` or `"codex"`, the handler dispatches to `acpUtilityPrompt()` or `codexUtilityPrompt()` on the active session instead.
 
 ### Jira Integration
 
@@ -692,6 +692,7 @@ Types shared between electron and renderer live in `shared/types/`. Both tsconfi
 - `SessionBase` — shared base for `ChatSession` and `PersistedSession`
 - `BackgroundSessionSnapshot` — `{ isProcessing, isConnected, isCompacting, sessionInfo, totalCost, contextUsage }` snapshot for background store
 - `ContextUsage` (`src/types/mcp.ts`) — `{ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, contextWindow }` — context window consumption tracked per session
+- `ClaudeEffort` (`src/types/session.ts`) — `"low" | "medium" | "high" | "max"` — per-session reasoning effort for Claude; maps to extended thinking token budgets; exposed via `PaneController` (`paneClaudeEffort`) and managed in `useSessionManager` (`setActiveClaudeEffort`)
 - `GrabbedElement` (`src/types/attachments.ts`) — `{ id, tag, text, html, timestamp }` — DOM element captured from the Browser Panel for use as session context
 
 **Electron SDK types**: `electron/src/lib/sdk.ts` imports `Query` and `query` types directly from `@anthropic-ai/claude-agent-sdk` (no more manual type definitions or double-casts). ACP connection is typed as `ClientSideConnection` from `@agentclientprotocol/sdk`.
