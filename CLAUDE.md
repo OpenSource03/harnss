@@ -75,17 +75,19 @@ electron/
 src/
 ├── components/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
-│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
+│   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance,
+│   │                  #   BrowserStartPage, browser-types.ts, browser-utils.ts)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
 │   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
 │   ├── tool-renderers/# Built-in tool renderers (BashContent, EditContent, TaskTool, etc.)
-│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12 panels)
+│   ├── settings/      # Settings sub-views + shared SettingRow/SettingsSelect (12+ panels, incl. AgentStore)
 │   ├── sidebar/       # AppSidebar decomposed (ProjectSection, FolderSection, BranchSection,
 │   │                  #   PinnedSection, SessionItem, CCSessionList, SidebarActionsContext)
-│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle, etc.)
+│   ├── split/         # Split pane layout (SplitPaneHost, SplitChatPane, SplitHandle,
+│   │                  #   SplitDropZone, SplitBottomToolIsland, SplitPaneToolStrip, SplitTopRowItem)
 │   ├── welcome/       # Onboarding wizard (WelcomeWizard, 9 step components)
 │   ├── workspace/     # Workspace layout (MainTopToolArea, MainBottomToolDock, RightPanel, ToolIslandContent)
 │   ├── lib/           # Component-local utilities (tool-metadata, tool-formatting, ToolGlyph, chat-layout)
@@ -613,6 +615,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitBottomToolIsland.tsx` — renders a single tool island in the split-view bottom dock
+- `SplitPaneToolStrip.tsx` — per-pane icon tool strip for the split view
+- `SplitTopRowItem.tsx` — renders one top-row item (chat pane or tool column) in split layout
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
