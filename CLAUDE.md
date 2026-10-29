@@ -6,7 +6,7 @@ Open-source desktop client for the Agent Client Protocol. Uses the `@anthropic-a
 
 - **Runtime**: Electron 40 (main process) + React 19 (renderer)
 - **Build**: Vite 7, TypeScript 5.9, tsup (electron TS→JS), electron-builder (cross-platform packaging)
-- **Testing**: vitest (unit tests for hooks, lib utilities, and electron modules; config: `vitest.config.electron.ts`)
+- **Testing**: vitest (unit tests for hooks, lib utilities, and electron modules; config: `vitest.config.electron.ts`). Renderer tests live in `src/components/` and `src/lib/engine/` alongside the source; electron main-process tests live in `electron/src/lib/__tests__/`.
 - **Styling**: Tailwind CSS v4 + ShadCN UI (includes Preflight — no CSS resets needed)
 - **UI Components**: ShadCN (Button, Badge, ScrollArea, Tooltip, Collapsible, Separator, DropdownMenu, Avatar)
 - **Icons**: lucide-react
