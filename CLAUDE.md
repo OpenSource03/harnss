@@ -77,7 +77,8 @@ src/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
 │   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
-│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
+│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete,
+│   │                  #   input-bar-utils.ts — file reading, BLANK_AUDIO stripping, cursor helpers)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
@@ -430,7 +431,7 @@ Three tiers of settings storage, each suited to different access patterns:
 - `useContextMenuPosition` — shared positioning logic for right-click and button-triggered context menus (open state, align, coordinates)
 - `useInlineRename` — controlled edit state for inline rename inputs (isEditing, editName, handlers)
 
-**BackgroundSessionStore** — accumulates events for non-active sessions to prevent state loss when switching. On switch-away, session state is captured into the store; on switch-back, state is consumed from the store (or loaded from disk if no live process). Event handling is split into per-engine handler modules (`background-claude-handler.ts`, `background-acp-handler.ts`, `background-codex-handler.ts`). `InternalState` also tracks `contextUsage`, `isCompacting`, `codexPlanText`/`codexPlanTurnCounter` (Codex plan mode output), `activeTask`, `slashCommands`, and `pendingPermission`/`rawAcpPermission` for per-engine permission bridging.
+**BackgroundSessionStore** — accumulates events for non-active sessions to prevent state loss when switching. On switch-away, session state is captured into the store; on switch-back, state is consumed from the store (or loaded from disk if no live process). Event handling is split into per-engine handler modules (`background-claude-handler.ts`, `background-acp-handler.ts`, `background-codex-handler.ts`). `InternalState` also tracks `contextUsage`, `isCompacting`, `codexPlanText`/`codexPlanTurnCounter` (Codex plan mode output), `activeTask`, `slashCommands`, and `pendingPermission`/`rawAcpPermission` for per-engine permission bridging. The store also exposes `updateMessages(sessionId, updater)` and `setProcessing(sessionId, isProcessing)` so background queue draining can continue sending queued messages even after the user switches away.
 
 ### Claude CLI Stream-JSON Protocol
 
