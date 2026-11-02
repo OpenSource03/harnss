@@ -77,7 +77,8 @@ src/
 │   ├── git/           # GitPanel decomposed (GitPanel, RepoSection, BranchPicker, CommitInput, etc.)
 │   ├── browser/       # BrowserPanel decomposed (BrowserNavBar, BrowserUrlBar, WebviewInstance, etc.)
 │   ├── input-bar/     # InputBar decomposed (CommandPicker, MentionPicker, EngineControls,
-│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete)
+│   │                  #   AttachmentPreview, ContextGauge, EnginePickerDropdown, useMentionAutocomplete,
+│   │                  #   input-bar-utils — file reading, image type checks, cursor insertion helpers)
 │   ├── jira/          # Jira board UI (KanbanBoard, JiraIssueCard, JiraBoardSetup)
 │   ├── mcp/           # MCP server management UI (AddServerDialog, McpServerRow, McpAuthStatus)
 │   ├── mcp-renderers/ # MCP tool renderers (jira, confluence, atlassian, context7, shared, helpers)
@@ -613,6 +614,9 @@ The Browser Panel supports a "grab element" feature that attaches DOM elements f
 - `SplitHandle.tsx` — draggable divider between panes
 - `SplitDropZone.tsx` — drag target for dropping sessions into a pane
 - `SplitChatPane.tsx` — single pane with its own session, tools, and input
+- `SplitTopRowItem.tsx` — renders one item (chat pane or tool column) in the split-view top row; extracted from AppLayout
+- `SplitBottomToolIsland.tsx` — renders a single tool island in the split-view bottom dock
+- `SplitPaneToolStrip.tsx` — vertical icon strip (ToolPicker equivalent) scoped to one split pane
 - `useSplitView` — manages split state (which sessions are in which pane, layout ratio)
 - `useSplitDragDrop` — drag-and-drop session assignment to panes
 - Layout math in `src/lib/layout/split-layout.ts`
