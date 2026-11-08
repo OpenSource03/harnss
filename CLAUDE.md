@@ -399,7 +399,7 @@ Three tiers of settings storage, each suited to different access patterns:
 - `useStreamingTextReveal` — per-token fade-in animation via DOM text node splitting
 - `useProjectManager` — project CRUD via IPC
 - `useFolderManager` — folder picker for project path selection
-- `useBackgroundAgents` — polls async Task agent output files every 3s, marks complete after 2 stable polls
+- `useBackgroundAgents` — subscribes to `BackgroundAgentStore` via `useSyncExternalStore`; all progress is event-driven (task_started → task_progress → task_notification events from useClaude), no file polling
 - `useSidebar` — sidebar open/close with localStorage persistence
 - `useGitStatus` — polls git status for the active project's cwd
 - `useWorktreeChips` — derives available worktrees for the WorktreeBar
@@ -430,7 +430,7 @@ Three tiers of settings storage, each suited to different access patterns:
 - `useContextMenuPosition` — shared positioning logic for right-click and button-triggered context menus (open state, align, coordinates)
 - `useInlineRename` — controlled edit state for inline rename inputs (isEditing, editName, handlers)
 
-**BackgroundSessionStore** — accumulates events for non-active sessions to prevent state loss when switching. On switch-away, session state is captured into the store; on switch-back, state is consumed from the store (or loaded from disk if no live process). Event handling is split into per-engine handler modules (`background-claude-handler.ts`, `background-acp-handler.ts`, `background-codex-handler.ts`). `InternalState` also tracks `contextUsage`, `isCompacting`, `codexPlanText`/`codexPlanTurnCounter` (Codex plan mode output), `activeTask`, `slashCommands`, and `pendingPermission`/`rawAcpPermission` for per-engine permission bridging.
+**BackgroundSessionStore** — accumulates events for non-active sessions to prevent state loss when switching. On switch-away, session state is captured into the store; on switch-back, state is consumed from the store (or loaded from disk if no live process). Event handling is split into per-engine handler modules (`src/lib/background/claude-handler.ts`, `acp-handler.ts`, `codex-handler.ts`). `InternalState` also tracks `contextUsage`, `isCompacting`, `codexPlanText`/`codexPlanTurnCounter` (Codex plan mode output), `activeTask`, `slashCommands`, and `pendingPermission`/`rawAcpPermission` for per-engine permission bridging.
 
 ### Claude CLI Stream-JSON Protocol
 
