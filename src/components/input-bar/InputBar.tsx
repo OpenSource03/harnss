@@ -6,6 +6,7 @@ import {
   memo,
   type KeyboardEvent,
 } from "react";
+import { useImeComposition } from "@/hooks/useImeComposition";
 import {
   ArrowUp,
   Loader2,
@@ -174,6 +175,8 @@ export const InputBar = memo(function InputBar({
   });
 
   const editableRef = useRef<HTMLDivElement>(null);
+
+  const ime = useImeComposition();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasContentRef = useRef(false);
 
@@ -460,6 +463,9 @@ export const InputBar = memo(function InputBar({
   // ── Keyboard handling ──
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    // An IME candidate commit is not a submit (and navigation keys during
+    // composition belong to the IME, not to the pickers below).
+    if (ime.isComposing(e)) return;
     // Slash command picker keyboard navigation
     if (command.showCommands && command.cmdResults.length > 0) {
       if (e.key === "ArrowDown") {
@@ -781,6 +787,8 @@ export const InputBar = memo(function InputBar({
             contentEditable
             onInput={handleEditableInput}
             onKeyDown={handleKeyDown}
+            onCompositionStart={ime.onCompositionStart}
+            onCompositionEnd={ime.onCompositionEnd}
             onPaste={handlePaste}
             className={`min-h-[24px] max-h-[200px] overflow-y-auto text-[14.5px] leading-relaxed outline-none whitespace-pre-wrap wrap-break-word ${
               isAwaitingAcpOptions

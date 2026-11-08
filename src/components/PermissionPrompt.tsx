@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useImeComposition } from "@/hooks/useImeComposition";
 import {
   ShieldAlert,
   Check,
@@ -206,6 +207,7 @@ const EXIT_PLAN_MODES = [
 ] as const;
 
 function ExitPlanModePrompt({ request, onRespond }: PermissionPromptProps) {
+  const ime = useImeComposition();
   const [feedback, setFeedback] = useState("");
   const hasFeedback = feedback.trim().length > 0;
 
@@ -250,7 +252,10 @@ function ExitPlanModePrompt({ request, onRespond }: PermissionPromptProps) {
             placeholder="Give feedback to refine the plan..."
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
+            onCompositionStart={ime.onCompositionStart}
+            onCompositionEnd={ime.onCompositionEnd}
             onKeyDown={(e) => {
+              if (ime.isComposing(e)) return;
               if (e.key === "Enter") submitFeedback();
               if (e.key === "Escape") setFeedback("");
             }}
@@ -288,6 +293,7 @@ function ExitPlanModePrompt({ request, onRespond }: PermissionPromptProps) {
 // Collapsible to a minimal bar so the user can read chat content behind it.
 
 function AskUserQuestionPrompt({ request, onRespond }: PermissionPromptProps) {
+  const ime = useImeComposition();
   const questions = (request.toolInput.questions ?? []) as Question[];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
@@ -461,6 +467,8 @@ function AskUserQuestionPrompt({ request, onRespond }: PermissionPromptProps) {
             type={q.isSecret ? "password" : "text"}
             placeholder={hasOptions ? "Or type your own…" : "Type your answer…"}
             value={freeText[questionKey] ?? ""}
+            onCompositionStart={ime.onCompositionStart}
+            onCompositionEnd={ime.onCompositionEnd}
             onChange={(e) => {
               const value = e.target.value;
               setFreeText((prev) => ({ ...prev, [questionKey]: value }));
@@ -472,6 +480,7 @@ function AskUserQuestionPrompt({ request, onRespond }: PermissionPromptProps) {
               }
             }}
             onKeyDown={(e) => {
+              if (ime.isComposing(e)) return;
               if (e.key === "Enter") {
                 if (isMulti && !isLast && hasCurrentAnswer) goNext();
                 else if (hasAllAnswers) handleSubmit();
