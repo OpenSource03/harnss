@@ -789,6 +789,7 @@ export const InputBar = memo(function InputBar({
             onKeyDown={handleKeyDown}
             onCompositionStart={ime.onCompositionStart}
             onCompositionEnd={ime.onCompositionEnd}
+            onKeyUp={ime.onKeyUp}
             onPaste={handlePaste}
             className={`min-h-[24px] max-h-[200px] overflow-y-auto text-[14.5px] leading-relaxed outline-none whitespace-pre-wrap wrap-break-word ${
               isAwaitingAcpOptions

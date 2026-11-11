@@ -1,42 +1,82 @@
 import { useCallback, useRef } from "react";
 
 type CompositionAwareEvent = {
-  nativeEvent?: { isComposing?: boolean; keyCode?: number };
+  key?: string;
   isComposing?: boolean;
   keyCode?: number;
+  nativeEvent?: { isComposing?: boolean; keyCode?: number; key?: string };
 };
 
+const ENTER = "Enter";
+
 /**
- * Distinguishes the Enter that commits an IME candidate from the Enter that
+ * Separates the Enter that commits an IME candidate from the Enter that
  * submits the message.
  *
- * Chromium fires `keydown` with `isComposing === true` for most IMEs, but the
- * commit keystroke is often dispatched *after* `compositionend`, with the flag
- * already cleared. Tracking composition state plus a short grace window after
- * `compositionend` covers both shapes.
+ * The committing keystroke is usually dispatched while the composition is
+ * still open, so `isComposing` and the IME-reserved `keyCode` 229 identify it
+ * on their own. Some IMEs end the composition first and dispatch the commit
+ * afterwards; that ordering is covered by arming a one-task flag on
+ * `compositionend`, so only the keystroke that follows the commit immediately
+ * is suppressed and a deliberate Enter a moment later still submits.
  */
 export function useImeComposition() {
   const composingRef = useRef(false);
-  const lastEndRef = useRef(0);
+  /** True once the committing Enter itself reached the guard. */
+  const swallowedCommitRef = useRef(false);
+  /** True for one task after a `compositionend` the guard did not see arrive. */
+  const pendingCommitRef = useRef(false);
+  const clearPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /** Marks the start of an IME composition. */
   const onCompositionStart = useCallback(() => {
     composingRef.current = true;
+    swallowedCommitRef.current = false;
   }, []);
 
+  /** Marks the end of an IME composition and arms the commit fallback. */
   const onCompositionEnd = useCallback(() => {
     composingRef.current = false;
-    lastEndRef.current = Date.now();
+
+    // The committing keystroke already passed through `isComposing`, so there
+    // is nothing left to suppress.
+    if (swallowedCommitRef.current) {
+      swallowedCommitRef.current = false;
+      return;
+    }
+
+    pendingCommitRef.current = true;
+    if (clearPendingRef.current) clearTimeout(clearPendingRef.current);
+    clearPendingRef.current = setTimeout(() => {
+      pendingCommitRef.current = false;
+    }, 0);
   }, []);
 
-  /** True while an IME is composing, or for the keystroke that commits it. */
+  /** Clears per-keystroke state so a later Enter is never suppressed. */
+  const onKeyUp = useCallback((event: CompositionAwareEvent) => {
+    const key = event.key ?? event.nativeEvent?.key;
+    if (key !== ENTER) return;
+    swallowedCommitRef.current = false;
+    pendingCommitRef.current = false;
+  }, []);
+
+  /** True when the event belongs to the IME rather than to the application. */
   const isComposing = useCallback((event: CompositionAwareEvent): boolean => {
     const native = event.nativeEvent ?? event;
-    if (composingRef.current) return true;
-    if (native?.isComposing) return true;
-    // 229 is what Chromium reports for keys consumed by the IME.
-    if (native?.keyCode === 229) return true;
-    return Date.now() - lastEndRef.current < 80;
+    const key = event.key ?? event.nativeEvent?.key;
+
+    if (composingRef.current || native?.isComposing || native?.keyCode === 229) {
+      if (key === ENTER) swallowedCommitRef.current = true;
+      return true;
+    }
+
+    if (key === ENTER && pendingCommitRef.current) {
+      pendingCommitRef.current = false;
+      return true;
+    }
+
+    return false;
   }, []);
 
-  return { onCompositionStart, onCompositionEnd, isComposing };
+  return { onCompositionStart, onCompositionEnd, onKeyUp, isComposing };
 }

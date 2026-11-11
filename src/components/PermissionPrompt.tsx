@@ -254,6 +254,7 @@ function ExitPlanModePrompt({ request, onRespond }: PermissionPromptProps) {
             onChange={(e) => setFeedback(e.target.value)}
             onCompositionStart={ime.onCompositionStart}
             onCompositionEnd={ime.onCompositionEnd}
+            onKeyUp={ime.onKeyUp}
             onKeyDown={(e) => {
               if (ime.isComposing(e)) return;
               if (e.key === "Enter") submitFeedback();
@@ -469,6 +470,7 @@ function AskUserQuestionPrompt({ request, onRespond }: PermissionPromptProps) {
             value={freeText[questionKey] ?? ""}
             onCompositionStart={ime.onCompositionStart}
             onCompositionEnd={ime.onCompositionEnd}
+            onKeyUp={ime.onKeyUp}
             onChange={(e) => {
               const value = e.target.value;
               setFreeText((prev) => ({ ...prev, [questionKey]: value }));
